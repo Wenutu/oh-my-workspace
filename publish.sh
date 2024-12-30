@@ -39,3 +39,4 @@ fi
 echo "Step2: add config.sh and build.sh"
 git add config/*/*/config.sh -f
 git add tools/*/*/*/build/build.sh -f
+git add tools/*/*/*/build/fix.sh -f

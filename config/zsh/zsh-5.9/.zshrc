@@ -7,12 +7,14 @@ fi
 
 # If you come from bash you might have to change your $PATH.
 # export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
+# Begin
 export OMW_HOME=$HOME/oh-my-workspace
 export PATH=$HOME/oh-my-workspace/scripts/bin:$PATH
 export MODULEPATH=$(echo "$OMW_HOME/tools/public/modulefiles:$OMW_HOME/tools/personal/modulefiles:$MODULEPATH" | tr ':' '\n' | sort -u | tr '\n' ':' | sed 's/:$//')
 export PUBLIC_SOFTWARE=$OMW_HOME/tools/public/software
 export PERSONAL_SOFTWARE=$OMW_HOME/tools/personal/software
 export CONFIG_PATH=$OMW_HOME/config
+# End
 # Path to your Oh My Zsh installation.
 export ZSH="$CONFIG_PATH/zsh/zsh-5.9/oh-my-zsh"
 
