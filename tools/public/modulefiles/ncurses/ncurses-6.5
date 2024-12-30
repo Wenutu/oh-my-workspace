@@ -1,0 +1,38 @@
+#%Module1.0
+##
+## ncurses modulefiles
+##
+proc ModulesHelp { } {
+    puts stderr "This module loads ncurses $version into the environment"
+}
+
+module-whatis "Loads ncurses 6.5 and updates PATH and other environment variables"
+
+set base $env(OMW_HOME)/tools/public/software
+set appname ncurses
+set version 6.5
+set prefix ${base}/${appname}/${appname}-${version}
+
+if {[info exists env(CFLAGS)]} {
+    setenv CFLAGS "$env(CFLAGS) -I$prefix/include"
+} else {
+    setenv CFLAGS "-I$prefix/include"
+}
+
+if {[info exists env(LDFLAGS)]} {
+    setenv LDFLAGS "$env(LDFLAGS) -L$prefix/lib -lncurses -lncursesw -ltinfow"
+} else {
+    setenv LDFLAGS "-L$prefix/lib -lncurses -lncursesw -ltinfow"
+}
+
+
+prepend-path PATH               $prefix/bin
+prepend-path C_INCLUDE_PATH     $prefix/include
+prepend-path CPLUS_INCLUDE_PATH $prefix/include
+prepend-path LIBRARY_PATH       $prefix/lib
+prepend-path LD_LIBRARY_PATH    $prefix/lib
+prepend-path PKG_CONFIG_PATH    $prefix/lib/pkgconfig
+prepend-path MANPATH            $prefix/share/man
+
+
+

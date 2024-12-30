@@ -1,0 +1,25 @@
+#%Module1.0
+##
+## libevent modulefiles
+##
+proc ModulesHelp { } {
+    puts stderr "This module loads libevent $version into the environment"
+}
+
+module-whatis "Loads libevent 2.1.12 and updates PATH and other environment variables"
+
+set base $env(OMW_HOME)/tools/public/software
+set appname libevent
+set version 2.1.12
+set prefix ${base}/${appname}/${appname}-${version}
+
+prepend-path PATH               $prefix/bin
+prepend-path C_INCLUDE_PATH     $prefix/include
+prepend-path CPLUS_INCLUDE_PATH $prefix/include
+prepend-path LIBRARY_PATH       $prefix/lib
+prepend-path LD_LIBRARY_PATH    $prefix/lib
+prepend-path PKG_CONFIG_PATH    $prefix/lib/pkgconfig
+prepend-path MANPATH            $prefix/share/man
+
+
+
