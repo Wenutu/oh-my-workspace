@@ -18,7 +18,7 @@ if [ -d ./openssl-1.1.1w ]; then
   rm -rf ./openssl-1.1.1w
 fi
 echo "Extracting openssl-1.1.1w.tar.gz"
-tar -zxf $OMW_HOME/packages/openssl-1.1.1w.tar.gz
+tar -zxf $OMW_HOME/packages/software/openssl-1.1.1w.tar.gz
 cd openssl-1.1.1w
 echo "Configuring openssl-1.1.1w"
 ./config --prefix=$PUBLIC_SOFTWARE/openssl/openssl-1.1.1w --openssldir=$PUBLIC_SOFTWARE/openssl/openssl-1.1.1w

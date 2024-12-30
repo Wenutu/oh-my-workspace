@@ -22,7 +22,7 @@ if [ -d ./Python-3.9.21 ]; then
   rm -rf ./Python-3.9.21
 fi
 echo "Extracting Python-3.9.21.tgz"
-tar xf $OMW_HOME/packages/Python-3.9.21.tgz
+tar xf $OMW_HOME/packages/software/Python-3.9.21.tgz
 echo "Installing Python-3.9.21"
 cd Python-3.9.21
 echo "Load openssl/openssl-1.1.1w"

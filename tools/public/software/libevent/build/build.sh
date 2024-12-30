@@ -18,7 +18,7 @@ if [ -d ./libevent-2.1.12-stable ]; then
   rm -rf ./libevent-2.1.12-stable
 fi
 echo "Extracting libevent-2.1.12-stable"
-tar xf $OMW_HOME/packages/libevent-2.1.12-stable.tar.gz
+tar xf $OMW_HOME/packages/software/libevent-2.1.12-stable.tar.gz
 cd ./libevent-2.1.12-stable
 echo "Building libevent-2.1.12-stable"
 PKG_CONFIG_PATH=$PUBLIC_SOFTWARE/openssl/openssl-1.1.1w/lib/pkgconfig ./configure --prefix=$PUBLIC_SOFTWARE/libevent/libevent-2.1.12 --enable-shared

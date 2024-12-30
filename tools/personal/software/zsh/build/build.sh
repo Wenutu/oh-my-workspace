@@ -22,7 +22,7 @@ if [ -d ./zsh-5.9 ]; then
   rm -rf ./zsh-5.9
 fi
 echo "Extracting zsh-5.9.tar.xz"
-tar xf $OMW_HOME/packages/zsh-5.9.tar.xz
+tar xf $OMW_HOME/packages/software/zsh-5.9.tar.xz
 echo "Building zsh-5.9"
 cd ./zsh-5.9
 echo "Load ncurses/ncurses-6.5"

@@ -18,7 +18,7 @@ if [ -d ./ncurses-6.5 ]; then
   rm -rf ./ncurses-6.5
 fi
 echo "Extract ncurses-6.5.tar.gz"
-tar -zxf $OMW_HOME/packages/ncurses-6.5.tar.gz -C .
+tar -zxf $OMW_HOME/packages/software/ncurses-6.5.tar.gz -C .
 cd ncurses-6.5
 echo "Install ncurses-6.5 to $PUBLIC_SOFTWARE/ncurses/ncurses-6.5"
 echo "Build ncurses-6.5 with normal"

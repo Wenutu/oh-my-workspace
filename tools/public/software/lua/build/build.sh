@@ -18,7 +18,7 @@ if [ -d ./lua-5.4.7 ]; then
   rm -rf ./lua-5.4.7
 fi
 echo "Extract lua-5.4.7.tar.gz"
-tar xf $OMW_HOME/packages/lua-5.4.7.tar.gz
+tar xf $OMW_HOME/packages/software/lua-5.4.7.tar.gz
 cd lua-5.4.7
 echo "Configure lua-5.4.7"
 # Makefile

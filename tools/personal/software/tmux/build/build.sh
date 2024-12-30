@@ -18,7 +18,7 @@ if [ -d ./tmux-3.5a ]; then
   rm -rf ./tmux-3.5a
 fi
 echo "Extracting tmux-3.5a.tar.gz"
-tar xf $OMW_HOME/packages/tmux-3.5a.tar.gz -C .
+tar xf $OMW_HOME/packages/software/tmux-3.5a.tar.gz -C .
 cd tmux-3.5a
 echo "Load ncurses/ncurses-6.5 and libevent/libevent-2.1.12"
 module load ncurses/ncurses-6.5 libevent/libevent-2.1.12
