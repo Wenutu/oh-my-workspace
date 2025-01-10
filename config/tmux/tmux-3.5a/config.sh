@@ -23,3 +23,8 @@ fi
 echo "Extracting tmux.tar.gz"
 tar -xf $OMW_HOME/packages/config/tmux.tar.gz -C $CONFIG_PATH/tmux/tmux-3.5a
 echo "Installing .tmux to $CONFIG_PATH/tmux/tmux-3.5a/.tmux"
+
+echo "Symlinking.tmux.conf to $HOME/.tmux.conf"
+ln -s $CONFIG_PATH/tmux/tmux-3.5a/.tmux/.tmux.conf $HOME/.tmux.conf
+echo "Symlinking.tmux.conf.local to $HOME/.tmux.conf.local"
+ln -s $CONFIG_PATH/tmux/tmux-3.5a/.tmux/.tmux.conf.local $HOME/.tmux.conf.local

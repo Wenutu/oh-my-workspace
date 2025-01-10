@@ -6,11 +6,11 @@ proc ModulesHelp { } {
     puts stderr "This module loads nvim $version into the environment"
 }
 
-module-whatis "Loads nvim 0.10.1 and updates PATH and other environment variables"
+module-whatis "Loads nvim 0.10.3 and updates PATH and other environment variables"
 
 set base $env(OMW_HOME)/tools/personal/software
 set appname nvim
-set version 0.10.1
+set version 0.10.3
 set prefix ${base}/${appname}/${appname}-${version}
 
 prepend-path PATH                   $prefix/bin

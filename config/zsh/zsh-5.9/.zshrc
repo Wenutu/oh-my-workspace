@@ -122,10 +122,9 @@ alias zshconfig="vi $ZDOTDIR/.zsh rc"
 alias sc="source $ZDOTDIR/.zshrc"
 
 
+module load vim tmux
 
 export LC_CTYPE="en_US.UTF-8"
-
-source $ZSH_CUSTOM/themes/powerlevel10k/powerlevel10k.zsh-theme
 
 # To customize prompt, run `p10k configure` or edit ~/oh-my-workspace/config/zsh/zsh-5.9/.p10k.zsh.
 [[ ! -f ~/oh-my-workspace/config/zsh/zsh-5.9/.p10k.zsh ]] || source ~/oh-my-workspace/config/zsh/zsh-5.9/.p10k.zsh
