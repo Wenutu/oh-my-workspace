@@ -28,11 +28,17 @@ fi
 
 cd vim-$version || exit 1
 module load ncurses/ncurses-6.5 python/python-3.9.21 local/local-1.0.0
+#if [ -f src/auto/config.cache ]; then
+#  echo "Removing src/auto/config.cache"
+#  rm src/auto/config.cache
+#fi
 ./configure --prefix=$PERSONAL_SOFTWARE/vim/vim-$version \
             --with-features=huge --enable-multibyte \
             --enable-perlinterp \
             --enable-luainterp=yes --with-lua-prefix=$PUBLIC_SOFTWARE/lua/lua-5.4.7 \
-            --enable-pythoninterp --enable-python3interp \
+            --enable-pythoninterp \
+            --enable-python3interp \
+            --with-python3-config-dir=$(python3-config --configdir) \
             --enable-gui=gtk3 --with-tlib=ncursesw \
             --enable-cscope --enable-fontset --with-compiledby="Wentao Shi"
 

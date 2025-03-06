@@ -28,7 +28,7 @@ echo "Installing Python-$version"
 cd Python-$version || exit 1
 echo "Load openssl/openssl-1.1.1w"
 module load openssl/openssl-1.1.1w
-./configure --prefix=$PERSONAL_SOFTWARE/python/python-$version --with-openssl=$PUBLIC_SOFTWARE/openssl/openssl-1.1.1w --with-ensurepip=install
+./configure --prefix=$PERSONAL_SOFTWARE/python/python-$version --with-openssl=$PUBLIC_SOFTWARE/openssl/openssl-1.1.1w --with-ensurepip=install --enable-shared
 echo "Make and install Python-$version"
 make -j $(($(nproc) / 2)) && make install
 echo "Installing Python to $PERSONAL_SOFTWARE/python/python-$version"

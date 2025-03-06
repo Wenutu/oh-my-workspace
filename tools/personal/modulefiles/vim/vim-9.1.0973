@@ -13,7 +13,7 @@ set appname vim
 set version 9.1.0973
 set prefix ${base}/${appname}/${appname}-${version}
 
-module load ncurses/ncurses-6.5 local/local-1.0.0
+module load ncurses/ncurses-6.5 local/local-1.0.0 python/python-3.9.21
 
 prepend-path PATH                   $prefix/bin
 #prepend-path C_INCLUDE_PATH        $prefix/include
