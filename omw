@@ -31,7 +31,6 @@ init_globals() {
     log "PATH: $PATH"
     log "MODULEPATH: $MODULEPATH"
 
-
     CONFIG_PATH="$OMW_HOME/config"
     PACKAGES_PATH="$OMW_HOME/packages"
     PUBLIC_SOFTWARE_PATH="$OMW_HOME/tools/public/software"
@@ -358,6 +357,7 @@ clean() {
 # Build OpenSSL with FIPS module support
 build_openssl() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PUBLIC_SOFTWARE[openssl]}
     local prefix="$PUBLIC_SOFTWARE_PATH/openssl/openssl-$version"
     local pkg_url="https://www.openssl.org/source/openssl-$version.tar.gz"
@@ -368,19 +368,24 @@ build_openssl() {
     log "# Building OpenSSL $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
+        fi
 
-    if [[ -d "$prefix" ]]; then
-        log "OpenSSL $version already installed" "INFO"
-        return 0
-    fi
+        if [[ -d "$prefix" ]]; then
+            log "OpenSSL $version already installed" "INFO"
+            return 0
+        fi
 
-    download_package "$pkg_url" "$pkg_path"
-    extract_package "$pkg_path" "$build_dir"
+        download_package "$pkg_url" "$pkg_path"
+        extract_package "$pkg_path" "$build_dir"
 
-    local configure_command="./config --prefix=$prefix --openssldir=$prefix"
-    if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
-        return 1
+        local configure_command="./config --prefix=$prefix --openssldir=$prefix"
+        if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
+            return 1
+        fi
     fi
 
     local modulefile_path=$(write_modulefile openssl "$version" public)
@@ -395,6 +400,7 @@ build_openssl() {
 # Build Libevent with OpenSSL integration
 build_libevent() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PUBLIC_SOFTWARE[libevent]}
     local prefix="$PUBLIC_SOFTWARE_PATH/libevent/libevent-$version"
     local pkg_url="https://github.com/libevent/libevent/releases/download/release-$version-stable/libevent-$version-stable.tar.gz"
@@ -405,25 +411,30 @@ build_libevent() {
     log "# Building Libevent $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
+        fi
 
-    if [[ -d "$prefix" ]]; then
-        log "Libevent $version already installed" "INFO"
-        return 0
-    fi
+        if [[ -d "$prefix" ]]; then
+            log "Libevent $version already installed" "INFO"
+            return 0
+        fi
 
-    download_package "$pkg_url" "$pkg_path"
-    extract_package "$pkg_path" "$build_dir"
+        download_package "$pkg_url" "$pkg_path"
+        extract_package "$pkg_path" "$build_dir"
 
-    # build openssl
-    build_openssl
-    local openssl_version=${PUBLIC_SOFTWARE[openssl]}
-    module load openssl/openssl-${PUBLIC_SOFTWARE[openssl]}
-    #local configure_command="PKG_CONFIG_PATH=$PUBLIC_SOFTWARE_PATH/openssl/openssl-$openssl_version/lib/pkgconfig ./configure --prefix=$prefix --enable-shared"
-    local configure_command="./configure --prefix=$prefix --enable-shared"
+        # build openssl
+        build_openssl "$force" "$refresh"
+        local openssl_version=${PUBLIC_SOFTWARE[openssl]}
+        module load openssl/openssl-${PUBLIC_SOFTWARE[openssl]}
+        #local configure_command="PKG_CONFIG_PATH=$PUBLIC_SOFTWARE_PATH/openssl/openssl-$openssl_version/lib/pkgconfig ./configure --prefix=$prefix --enable-shared"
+        local configure_command="./configure --prefix=$prefix --enable-shared"
 
-    if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
-        return 1
+        if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
+            return 1
+        fi
     fi
 
     local modulefile_path=$(write_modulefile libevent "$version" public)
@@ -438,6 +449,7 @@ build_libevent() {
 # Build Ncurses with wide-character support
 build_ncurses() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PUBLIC_SOFTWARE[ncurses]}
     local prefix="$PUBLIC_SOFTWARE_PATH/ncurses/ncurses-$version"
     local pkg_url="https://ftp.gnu.org/gnu/ncurses/ncurses-$version.tar.gz"
@@ -448,27 +460,32 @@ build_ncurses() {
     log "# Building Ncurses $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
+        fi
 
-    if [[ -d "$prefix" ]]; then
-        log "Ncurses $version already installed" "INFO"
-        return 0
-    fi
+        if [[ -d "$prefix" ]]; then
+            log "Ncurses $version already installed" "INFO"
+            return 0
+        fi
 
-    download_package "$pkg_url" "$pkg_path"
-    extract_package "$pkg_path" "$build_dir"
+        download_package "$pkg_url" "$pkg_path"
+        extract_package "$pkg_path" "$build_dir"
 
-    local configure_normal="./configure --prefix=$prefix --with-normal --disable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
-    local configure_widec="./configure --prefix=$prefix --with-normal --enable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
+        local configure_normal="./configure --prefix=$prefix --with-normal --disable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
+        local configure_widec="./configure --prefix=$prefix --with-normal --enable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
 
-    log "Configuring Ncurses $version (normal)..." "INFO"
-    if ! execute_build_steps "$build_dir" "$configure_normal" "$BUILD_JOBS" "$prefix"; then
-        return 1
-    fi
+        log "Configuring Ncurses $version (normal)..." "INFO"
+        if ! execute_build_steps "$build_dir" "$configure_normal" "$BUILD_JOBS" "$prefix"; then
+            return 1
+        fi
 
-    log "Configuring Ncurses $version (widec)..." "INFO"
-    if ! execute_build_steps "$build_dir" "$configure_widec" "$BUILD_JOBS" "$prefix"; then
-        return 1
+        log "Configuring Ncurses $version (widec)..." "INFO"
+        if ! execute_build_steps "$build_dir" "$configure_widec" "$BUILD_JOBS" "$prefix"; then
+            return 1
+        fi
     fi
 
     local modulefile_path=$(write_modulefile ncurses "$version" public "-I\$prefix/include" "-L\$prefix/lib -lncurses -lncursesw -ltinfo -ltinfow")
@@ -483,6 +500,7 @@ build_ncurses() {
 # Build Lua with readline integration
 build_lua() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PUBLIC_SOFTWARE[lua]}
     local prefix="$PUBLIC_SOFTWARE_PATH/lua/lua-$version"
     local pkg_url="https://www.lua.org/ftp/lua-$version.tar.gz"
@@ -493,26 +511,31 @@ build_lua() {
     log "# Building Lua $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
+        fi
 
-    if [[ -d "$prefix" ]]; then
-        log "Lua $version already installed" "INFO"
-        return 0
+        if [[ -d "$prefix" ]]; then
+            log "Lua $version already installed" "INFO"
+            return 0
+        fi
+
+        download_package "$pkg_url" "$pkg_path"
+        extract_package "$pkg_path" "$build_dir"
+
+        log "Building Lua $version..." "INFO"
+        (
+            spinner &
+            spinner_pid=$!
+            cd "$build_dir"
+            make linux INSTALL_TOP="$prefix" MYCFLAGS="-fPIC" MYLIBS="-Wl,-E" > make_config.log 2>&1 # Capture config make output as well for lua
+            make install INSTALL_TOP="$prefix" >> make_config.log 2>&1
+            kill "$spinner_pid" 2>/dev/null
+            stop_spinner
+        )
     fi
-
-    download_package "$pkg_url" "$pkg_path"
-    extract_package "$pkg_path" "$build_dir"
-
-    log "Building Lua $version..." "INFO"
-    (
-        spinner &
-        spinner_pid=$!
-        cd "$build_dir"
-        make linux INSTALL_TOP="$prefix" MYCFLAGS="-fPIC" MYLIBS="-Wl,-E" > make_config.log 2>&1 # Capture config make output as well for lua
-        make install INSTALL_TOP="$prefix" >> make_config.log 2>&1
-        kill "$spinner_pid" 2>/dev/null
-        stop_spinner
-    )
 
     local modulefile_path=$(write_modulefile lua "$version" public)
     if [[ -f "$modulefile_path" ]]; then
@@ -526,6 +549,7 @@ build_lua() {
 # Build local dependencies using system packages
 build_local() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PUBLIC_SOFTWARE[local]}
     local prefix="$PUBLIC_SOFTWARE_PATH/local/local-$version"
     local build_dir="$PUBLIC_SOFTWARE_PATH/local/build"
@@ -535,66 +559,71 @@ build_local() {
     log "# Building local dependencies $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
-
-    if [[ -d "$prefix" ]]; then
-        log "Local dependencies already installed" "INFO"
-        return 0
-    fi
-    if [[ ! -d "$build_dir" ]]; then
-        mkdir -p "$build_dir"
-    fi
-    # build is empty download required packages
-    if [[ ! -f $package_path ]] && [[ -z "$(ls -A $build_dir)" ]]; then
-        log "Downloading system dependencies..." "INFO"
-        # Download required RPM packages
-        spinner &
-        spinner_pid=$!
-        yumdownloader --destdir="$build_dir" --resolve \
-            gtk3-devel \
-            libX11-devel \
-            libXt-devel \
-            libSM-devel \
-            libICE-devel \
-            libXpm-devel \
-            xorg-x11-proto-devel \
-            perl-ExtUtils-Embed > /dev/null
-        kill "$spinner_pid" 2>/dev/null
-        stop_spinner
-
-        # Remove 32-bit packages
-        find "$build_dir" -name "*.i686.rpm" -delete
-    else
-        extract_package "$package_path" "$build_dir"
-    fi
-    
-    mkdir -p "$prefix"
-    cd $prefix
-    log "Extracting packages to $prefix..." "INFO"
-    find $build_dir -maxdepth 1 -name "*.rpm" -print0 | while IFS= read -r -d $'\0' rpm_file; do
-        rpm2cpio "$rpm_file" | cpio -idmv &> /dev/null
-    done
-
-    # Fix broken symbolic links
-    log "Fixing symbolic links..." "INFO"
-    find "$prefix" -type l | while read -r link; do
-        target=$(readlink "$link")
-        if [[ ! -e "$prefix/$target" ]]; then
-            new_target="/lib64/$target"
-            if [[ -e "$new_target" ]]; then
-                ln -sfn "$new_target" "$link"
-                #log "Fixed link: $link -> $new_target" "DEBUG"
-            fi
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
         fi
-    done
 
-    # Fix .pc files
-    log "Updating pkg-config files..." "INFO"
-    find "$prefix" -name "*.pc" | while read -r pcfile; do
-        sed -i "s|=/usr|=$prefix/usr|g" $pcfile
-        sed -i "s|-I/usr|-I$prefix/usr|g" "$pcfile"
-        sed -i "s|-L/usr|-L$prefix/usr|g" "$pcfile"
-    done
+        if [[ -d "$prefix" ]]; then
+            log "Local dependencies already installed" "INFO"
+            return 0
+        fi
+        if [[ ! -d "$build_dir" ]]; then
+            mkdir -p "$build_dir"
+        fi
+        # build is empty download required packages
+        if [[ ! -f $package_path ]] && [[ -z "$(ls -A $build_dir)" ]]; then
+            log "Downloading system dependencies..." "INFO"
+            # Download required RPM packages
+            spinner &
+            spinner_pid=$!
+            yumdownloader --destdir="$build_dir" --resolve \
+                gtk3-devel \
+                libX11-devel \
+                libXt-devel \
+                libSM-devel \
+                libICE-devel \
+                libXpm-devel \
+                xorg-x11-proto-devel \
+                perl-ExtUtils-Embed > /dev/null
+            kill "$spinner_pid" 2>/dev/null
+            stop_spinner
+
+            # Remove 32-bit packages
+            find "$build_dir" -name "*.i686.rpm" -delete
+        else
+            extract_package "$package_path" "$build_dir"
+        fi
+
+        mkdir -p "$prefix"
+        cd $prefix
+        log "Extracting packages to $prefix..." "INFO"
+        find $build_dir -maxdepth 1 -name "*.rpm" -print0 | while IFS= read -r -d $'\0' rpm_file; do
+            rpm2cpio "$rpm_file" | cpio -idmv &> /dev/null
+        done
+
+        # Fix broken symbolic links
+        log "Fixing symbolic links..." "INFO"
+        find "$prefix" -type l | while read -r link; do
+            target=$(readlink "$link")
+            if [[ ! -e "$prefix/$target" ]]; then
+                new_target="/lib64/$target"
+                if [[ -e "$new_target" ]]; then
+                    ln -sfn "$new_target" "$link"
+                    #log "Fixed link: $link -> $new_target" "DEBUG"
+                fi
+            fi
+        done
+
+        # Fix .pc files
+        log "Updating pkg-config files..." "INFO"
+        find "$prefix" -name "*.pc" | while read -r pcfile; do
+            sed -i "s|=/usr|=$prefix/usr|g" $pcfile
+            sed -i "s|-I/usr|-I$prefix/usr|g" "$pcfile"
+            sed -i "s|-L/usr|-L$prefix/usr|g" "$pcfile"
+        done
+    fi
 
     local modulefile_path=$(write_modulefile local "$version" public "-I\$prefix/include -I/usr/include" "-L\$prefix/lib -L/usr/lib64")
     if [[ -f "$modulefile_path" ]]; then
@@ -611,6 +640,7 @@ build_local() {
 # Build Python with optimized settings
 build_python() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PERSONAL_SOFTWARE[python]}
     local prefix="$PERSONAL_SOFTWARE_PATH/python/python-$version"
     local pkg_url="https://www.python.org/ftp/python/$version/Python-$version.tgz"
@@ -621,27 +651,32 @@ build_python() {
     log "# Building Python $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
+        fi
 
-    if [[ -d "$prefix" ]]; then
-        log "Python $version already installed" "INFO"
-        return 0
+        if [[ -d "$prefix" ]]; then
+            log "Python $version already installed" "INFO"
+            return 0
+        fi
+
+        download_package "$pkg_url" "$pkg_path"
+        extract_package "$pkg_path" "$build_dir"
+
+        # Load required modules
+        build_openssl "$force" "$refresh"
+        module load openssl/openssl-${PUBLIC_SOFTWARE[openssl]}
+        local configure_command="./configure --prefix=$prefix --with-openssl=$PUBLIC_SOFTWARE_PATH/openssl/openssl-${PUBLIC_SOFTWARE[openssl]} --with-ensurepip=install --enable-shared"
+        if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
+            return 1
+        fi
+
+        # Create additional symlinks
+        ln -sf "$prefix/bin/python3.9" "$prefix/bin/python"
+        ln -sf "$prefix/bin/pip3.9" "$prefix/bin/pip"
     fi
-
-    download_package "$pkg_url" "$pkg_path"
-    extract_package "$pkg_path" "$build_dir"
-
-    # Load required modules
-    build_openssl
-    module load openssl/openssl-${PUBLIC_SOFTWARE[openssl]}
-    local configure_command="./configure --prefix=$prefix --with-openssl=$PUBLIC_SOFTWARE_PATH/openssl/openssl-${PUBLIC_SOFTWARE[openssl]} --with-ensurepip=install --enable-shared"
-    if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
-        return 1
-    fi
-
-    # Create additional symlinks
-    ln -sf "$prefix/bin/python3.9" "$prefix/bin/python"
-    ln -sf "$prefix/bin/pip3.9" "$prefix/bin/pip"
 
     local modulefile_path=$(write_modulefile python "$version" personal)
     if [[ -f "$modulefile_path" ]]; then
@@ -656,6 +691,7 @@ build_python() {
 # Build tmux with custom patches
 build_tmux() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PERSONAL_SOFTWARE[tmux]}
     local prefix="$PERSONAL_SOFTWARE_PATH/tmux/tmux-$version"
     local pkg_url="https://github.com/tmux/tmux/releases/download/$version/tmux-$version.tar.gz"
@@ -666,26 +702,31 @@ build_tmux() {
     log "# Building tmux $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
+        fi
 
-    if [[ -d "$prefix" ]]; then
-        log "tmux $version already installed" "INFO"
-        return 0
-    fi
+        if [[ -d "$prefix" ]]; then
+            log "tmux $version already installed" "INFO"
+            return 0
+        fi
 
-    download_package "$pkg_url" "$pkg_path"
-    extract_package "$pkg_path" "$build_dir"
+        download_package "$pkg_url" "$pkg_path"
+        extract_package "$pkg_path" "$build_dir"
 
-    # build ncurses libevent
-    build_ncurses
-    build_libevent
+        # build ncurses libevent
+        build_ncurses "$force" "$refresh"
+        build_libevent "$force" "$refresh"
 
-    module load ncurses/ncurses-${PUBLIC_SOFTWARE[ncurses]}
-    module load libevent/libevent-${PUBLIC_SOFTWARE[libevent]}
+        module load ncurses/ncurses-${PUBLIC_SOFTWARE[ncurses]}
+        module load libevent/libevent-${PUBLIC_SOFTWARE[libevent]}
 
-    local configure_command="./configure --prefix=$prefix"
-    if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
-        return 1
+        local configure_command="./configure --prefix=$prefix"
+        if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
+            return 1
+        fi
     fi
 
     local modulefile_path=$(write_modulefile tmux "$version" personal)
@@ -702,6 +743,7 @@ build_tmux() {
 # Build Zsh with additional modules
 build_zsh() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PERSONAL_SOFTWARE[zsh]}
     local prefix="$PERSONAL_SOFTWARE_PATH/zsh/zsh-$version"
     local pkg_url="https://sourceforge.net/projects/zsh/files/zsh/$version/zsh-$version.tar.xz"
@@ -712,22 +754,27 @@ build_zsh() {
     log "# Building Zsh $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
+        fi
 
-    if [[ -d "$prefix" ]]; then
-        log "Zsh $version already installed" "INFO"
-        return 0
-    fi
+        if [[ -d "$prefix" ]]; then
+            log "Zsh $version already installed" "INFO"
+            return 0
+        fi
 
-    download_package "$pkg_url" "$pkg_path"
-    extract_package "$pkg_path" "$build_dir"
+        download_package "$pkg_url" "$pkg_path"
+        extract_package "$pkg_path" "$build_dir"
 
-    # build ncurses
-    build_ncurses
-    module load ncurses/ncurses-${PUBLIC_SOFTWARE[ncurses]}
-    local configure_command="./configure --prefix=$prefix --enable-multibyte --enable-pcre --enable-zsh-mem"
-    if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
-        return 1
+        # build ncurses
+        build_ncurses "$force" "$refresh"
+        module load ncurses/ncurses-${PUBLIC_SOFTWARE[ncurses]}
+        local configure_command="./configure --prefix=$prefix --enable-multibyte --enable-pcre --enable-zsh-mem"
+        if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
+            return 1
+        fi
     fi
 
     local modulefile_path=$(write_modulefile zsh "$version" personal)
@@ -743,6 +790,7 @@ build_zsh() {
 # Build Vim with Lua support
 build_vim() {
     local force=${1:-false}
+    local refresh=${2:-false}
     local version=${PERSONAL_SOFTWARE[vim]}
     local prefix="$PERSONAL_SOFTWARE_PATH/vim/vim-$version"
     local pkg_url="https://github.com/vim/vim/archive/refs/tags/v$version.tar.gz"
@@ -753,27 +801,32 @@ build_vim() {
     log "# Building Vim $version"
     log "###############################################################################"
 
-    [[ "$force" == "force" ]] && rm -rf "$prefix" "$build_dir"
+    if [[ "$refresh" == "false" ]]; then
+        if [[ "$force" == "true" ]]; then
+            log "Force rebuild requested, removing existing installation and build directory..." "WARN"
+            rm -rf "$prefix" "$build_dir"
+        fi
 
-    if [[ -d "$prefix" ]]; then
-        log "Vim $version already installed" "INFO"
-        return 0
-    fi
+        if [[ -d "$prefix" ]]; then
+            log "Vim $version already installed" "INFO"
+            return 0
+        fi
 
-    download_package "$pkg_url" "$pkg_path"
-    extract_package "$pkg_path" "$build_dir"
+        download_package "$pkg_url" "$pkg_path"
+        extract_package "$pkg_path" "$build_dir"
 
-    # Load dependencies
-    module load ncurses/ncurses-${PUBLIC_SOFTWARE[ncurses]}
-    module load lua/lua-${PUBLIC_SOFTWARE[lua]}
-    module load python/python-${PERSONAL_SOFTWARE[python]}
-    module load local/local-${PUBLIC_SOFTWARE[local]}
+        # Load dependencies
+        module load ncurses/ncurses-${PUBLIC_SOFTWARE[ncurses]}
+        module load lua/lua-${PUBLIC_SOFTWARE[lua]}
+        module load python/python-${PERSONAL_SOFTWARE[python]}
+        module load local/local-${PUBLIC_SOFTWARE[local]}
 
-    local configure_command="./configure --prefix=$prefix --with-features=huge --enable-multibyte --enable-perlinterp --enable-luainterp=yes --with-lua-prefix=$PUBLIC_SOFTWARE_PATH/lua/lua-${PUBLIC_SOFTWARE[lua]} --enable-pythoninterp --enable-python3interp=yes --with-python3-config-dir=$(python3-config --configdir) --enable-gui=gtk3 --with-tlib=ncursesw --enable-cscope --enable-fontset --with-compiledby=Wentao\ Shi"
-    #local configure_command="./configure --prefix=$prefix --with-features=huge --enable-multibyte --enable-luainterp=yes --with-lua-prefix=$PUBLIC_SOFTWARE_PATH/lua/lua-${PUBLIC_SOFTWARE[lua]} --enable-pythoninterp --enable-python3interp=yes --with-python3-config-dir=$(python3-config --configdir) --enable-gui=gtk3 --with-tlib=ncursesw --enable-cscope --enable-fontset --with-compiledby='Wentao Shi'"
+        local configure_command="./configure --prefix=$prefix --with-features=huge --enable-multibyte --enable-perlinterp --enable-luainterp=yes --with-lua-prefix=$PUBLIC_SOFTWARE_PATH/lua/lua-${PUBLIC_SOFTWARE[lua]} --enable-pythoninterp --enable-python3interp=yes --with-python3-config-dir=$(python3-config --configdir) --enable-gui=gtk3 --with-tlib=ncursesw --enable-cscope --enable-fontset --with-compiledby=Wentao\ Shi"
+        #local configure_command="./configure --prefix=$prefix --with-features=huge --enable-multibyte --enable-luainterp=yes --with-lua-prefix=$PUBLIC_SOFTWARE_PATH/lua/lua-${PUBLIC_SOFTWARE[lua]} --enable-pythoninterp --enable-python3interp=yes --with-python3-config-dir=$(python3-config --configdir) --enable-gui=gtk3 --with-tlib=ncursesw --enable-cscope --enable-fontset --with-compiledby='Wentao Shi'"
 
-    if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
-        return 1
+        if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
+            return 1
+        fi
     fi
 
     local modulefile_path=$(write_modulefile vim "$version" personal)
@@ -809,7 +862,7 @@ config_tmux() {
     # Backup existing configuration
     [[ -f "$HOME/.tmux.conf" ]] && mv "$HOME/.tmux.conf" "$HOME/.tmux.conf.bak"
     [[ -d "$HOME/.tmux" ]] && mv "$HOME/.tmux" "$HOME/.tmux.bak"
-    
+
     if [[ ! -d "$config_dir" ]]; then
         mkdir -p "$config_dir"
     fi
@@ -921,6 +974,8 @@ main() {
     init_globals
     check_dependencies
     while [[ $# -gt 0 ]]; do
+        force_build=false
+        refresh_module=false
         case "$1" in
             -h|--help)
                 cat <<EOF
@@ -931,6 +986,7 @@ Options:
   -a, --all         Install all software and configurations
   -b, --build [SOFTWARE]  Build specific software
       --force       Force rebuild existing installations
+      --refresh     Refresh modulefile only
   -c, --config [SOFTWARE] Configure specific software
   --clean           Clean build directories
   -p, --pack        Create configuration packages
@@ -946,7 +1002,7 @@ EOF
                 exit 0
                 ;;
             -a|--all)
-                build_openssl
+                build_openssl 
                 build_libevent
                 build_ncurses
                 build_lua
@@ -955,20 +1011,35 @@ EOF
                 build_tmux
                 build_zsh
                 build_vim
-                config_tmux
-                config_zsh
+                #config_tmux
+                #config_zsh
                 exit 0
                 ;;
             -b|--build)
                 shift
                 software=$1
                 shift
+                while [[ $# -gt 0 ]]; do
+                    case "$1" in
+                        --force)
+                            force_build=true
+                            shift
+                            ;;
+                        --refresh)
+                            refresh_module=true
+                            shift
+                            ;;
+                        *)
+                            break
+                            ;;
+                    esac
+                done
                 case "$software" in
                     openssl|libevent|ncurses|lua|local)
-                        "build_$software" "$@"
+                        build_"$software" "$force_build" "$refresh_module"
                         ;;
                     python|tmux|zsh|vim)
-                        "build_$software" "$@"
+                        build_"$software" "$force_build" "$refresh_module"
                         ;;
                     *)
                         log "Unknown software: $software" "ERROR"
