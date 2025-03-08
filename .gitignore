@@ -1,8 +1,4 @@
 *.tar.gz
 packages/
-config/**/oh-my-zsh
-config/**/.zcompdump*
-config/**/.zsh_history
-config/**/.tmux
-
-tools/*/software/*
+config/
+tools/
