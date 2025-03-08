@@ -905,6 +905,12 @@ create_config_packages() {
 
     log "Creating rpms package..." "INFO"
     tar -czf "$PACKAGES_PATH/rpms.tar.gz" -C "$PUBLIC_SOFTWARE_PATH/local/build" .
+
+    timestamp=$(date +%Y-%m-%d-%H-%M-%S)
+    packages_archive="$OMW_HOME/packages-${timestamp}.tar.gz"
+    log "Creating packages folder package: $packages_archive" "INFO"
+    tar -czf "$packages_archive" -C "$OMW_HOME" "packages"
+    log "Packages folder package created successfully: $packages_archive" "SUCCESS"
 }
 
 ###############################################################################
