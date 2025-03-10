@@ -1,5 +1,5 @@
 #!/bin/bash
-echo -e "# OMW Configuration"
+#echo -e "# OMW Configuration"
 export OMW_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 if [[ ":$PATH:" != *":$OMW_HOME:"* ]]; then
@@ -18,7 +18,7 @@ if [[ ":$MODULEPATH:" != *":$OMW_HOME/tools/personal/modulefiles:"* ]]; then
    export MODULEPATH="$OMW_HOME/tools/personal/modulefiles:$MODULEPATH"
 fi
 
-echo -e "OMW_HOME=$OMW_HOME"
-echo -e "PATH=$PATH"
-echo -e "MODULEPATH=$MODULEPATH"
-echo -e "# End of OMW Configuration"
+#echo -e "OMW_HOME=$OMW_HOME"
+#echo -e "PATH=$PATH"
+#echo -e "MODULEPATH=$MODULEPATH"
+#echo -e "# End of OMW Configuration"
