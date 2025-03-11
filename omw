@@ -6,6 +6,7 @@ declare spinner_pid
 handle_sigint() {
     log "Interrupt signal (SIGINT) received. Exiting..." "WARN"
     stop_spinner
+    sleep 0.01
     kill -s SIGINT "$spinner_pid" 2>/dev/null
     exit 130
 }
@@ -114,7 +115,7 @@ spinner() {
 }
 
 stop_spinner() {
-    echo -ne "\r\033[K" >&2
+    echo -ne "\r\033[K\r\033[K\r\033[K" >&2 # Send clear command multiple times
 }
 
 check_dependencies() {
@@ -645,7 +646,7 @@ build_gcc() {
     local refresh="${2:-false}"
     local version=${PUBLIC_SOFTWARE[gcc]}
     local prefix="$PUBLIC_SOFTWARE_PATH/gcc/gcc-$version"
-    local pkg_url="http://ftp.gnu.org/gnu/gcc/gcc-$version/gcc-$version.tar.gz"
+    local pkg_url="https://ftp.gnu.org/gnu/gcc/gcc-$version/gcc-$version.tar.gz"
     local pkg_path="$PACKAGES_PATH/software/gcc-$version.tar.gz"
     local build_dir="$PUBLIC_SOFTWARE_PATH/gcc/build"
 
@@ -654,38 +655,80 @@ build_gcc() {
     log "###############################################################################"
 
     if [[ "$refresh" == "false" ]]; then
+        # If force=true, remove existing installation and build directory
         if [[ "$force" == "true" ]]; then
             log "Force rebuild requested for GCC $version." "WARN"
             backup_existing_installation "$prefix"
             rm -rf "$build_dir"
+        # If GCC is already installed and force=false, skip the build
         elif [[ -d "$prefix" ]]; then
             log "GCC $version already installed at $prefix. Skipping build. Use --force to rebuild." "INFO"
             return 0
         fi
 
-        gmp_url="http://gcc.gnu.org/pub/gcc/infrastructure/gmp-6.2.1.tar.bz2"
-        mpfr_url="http://gcc.gnu.org/pub/gcc/infrastructure/mpfr-4.1.0.tar.bz2"
-        mpc_url="http://gcc.gnu.org/pub/gcc/infrastructure/mpc-1.2.1.tar.gz"
-        isl_url="http://gcc.gnu.org/pub/gcc/infrastructure/isl-0.24.tar.bz2"
-
+        # Download GCC source code
         download_package "$pkg_url" "$pkg_path"
-        download_package "$gmp_url" "$PACKAGES_PATH/software/gmp-6.2.1.tar.bz2"
-        download_package "$mpfr_url" "$PACKAGES_PATH/software/mpfr-4.1.0.tar.bz2"
-        download_package "$mpc_url" "$PACKAGES_PATH/software/mpc-1.2.1.tar.gz"
-        download_package "$isl_url" "$PACKAGES_PATH/software/isl-0.24.tar.bz2"
         extract_package "$pkg_path" "$build_dir"
 
-        mv "$PACKAGES_PATH/software/gmp-6.2.1.tar.bz2" "$build_dir"
-        mv "$PACKAGES_PATH/software/mpfr-4.1.0.tar.bz2" "$build_dir"
-        mv "$PACKAGES_PATH/software/mpc-1.2.1.tar.gz" "$build_dir"
-        mv "$PACKAGES_PATH/software/isl-0.24.tar.bz2" "$build_dir"
+        # Define prerequisites (name and URL) -  From download_prerequisites.sh
+        local base_url='http://gcc.gnu.org/pub/gcc/infrastructure/'
+        local deps=(
+            "gmp gmp-6.2.1.tar.bz2"
+            "mpfr mpfr-4.1.0.tar.bz2"
+            "mpc mpc-1.2.1.tar.gz"
+            "isl isl-0.24.tar.bz2"
+        )
 
+        # Download, extract, and link dependencies
+        log "Downloading and extracting GCC prerequisites..."
+        for dep in "${deps[@]}"; do
+            local dep_name=$(echo "$dep" | awk '{print $1}')     # Extract dependency name (e.g., gmp)
+            local dep_archive=$(echo "$dep" | awk '{print $2}')  # Extract archive name (e.g., gmp-6.2.1.tar.bz2)
+            local dep_url="${base_url}${dep_archive}"
+            local dep_pkg="$PACKAGES_PATH/software/$dep_archive"
+            local dep_dir_name="${dep_archive%.tar*}" # e.g., gmp-6.2.1
+
+            # Check if dependency directory already exists and handle force
+            local dep_install_dir="$build_dir/$dep_dir_name"
+            if [[ "$force" == "true" ]]; then
+                rm -rf "$dep_install_dir" # Remove existing dependency directory if force is true
+            elif [[ -d "$dep_install_dir" ]]; then
+                log "Dependency $dep_name already extracted. Skipping download and extraction." "INFO"
+                continue # Skip to the next dependency if it exists and not forcing
+            fi
+
+            # Download the dependency
+            download_package "$dep_url" "$dep_pkg"
+
+            # Extract the dependency into the GCC build directory
+            extract_package "$dep_pkg" "$build_dir" 0
+
+            # Create a symbolic link for the dependency (like download_prerequisites.sh)
+            local dep_link_target="$build_dir/$dep_dir_name" 
+            local dep_link_name="$build_dir/$dep_name"
+            if [[ "$force" == "true" ]]; then
+                rm -f "$dep_link_name" # Remove existing symlink if force is true
+            elif [[ -L "$dep_link_name" ]]; then
+                log "Symlink for $dep_link_target already exists. Skipping symlink creation." "INFO"
+                continue # Skip symlink creation if it exists and not forcing
+            fi
+
+            ln -sf "$dep_link_target" "$dep_link_name" || {
+                log "Error creating symbolic link $dep_link_name -> $dep_link_target" "ERROR"
+                return 1
+            }
+            log "Created symbolic link $dep_link_name -> $dep_link_target" "INFO"
+        done
+        log "GCC prerequisites downloaded and extracted."
+        module load local/local-${PUBLIC_SOFTWARE[local]}
+        # Configure and build GCC
         local configure_command="./configure --prefix=$prefix --disable-checking --enable-languages=c,c++,fortran --disable-multilib"
         if ! execute_build_steps "$build_dir" "$configure_command" "$BUILD_JOBS" "$prefix"; then
-            return 1
+            return 1  # Return error if build fails
         fi
     fi
 
+    # Generate modulefile for environment management
     local modulefile_path=$(write_modulefile gcc "$version" public)
     if [[ -f "$modulefile_path" ]]; then
         log "Modulefile created for GCC $version: $modulefile_path" "INFO"
@@ -1122,7 +1165,7 @@ EOF
                 done
                 log "Option '--build $software' selected. Force: $force_build, Refresh Module: $refresh_module" "INFO"
                 case "$software" in
-                    openssl|libevent|ncurses|lua|local|python|tmux|zsh|vim)
+                    openssl|libevent|ncurses|lua|local|gcc|python|tmux|zsh|vim)
                         build_"$software" "$force_build" "$refresh_module"
                         ;;
                     *)
