@@ -70,15 +70,6 @@ jobs:
           chmod +x ./omw
           ./omw --pack
 
-      - name: Upload offline bundle and packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: omw-offline-bundle
-          path: |
-            $HOME/omw-offline-bundle-*.tar.gz
-            packages/SHA256SUMS
-            packages/**
-
   build-all:
     name: Build all software
     runs-on: ubuntu-latest
@@ -142,15 +133,3 @@ jobs:
           source /opt/rh/devtoolset-11/enable || true
           chmod +x ./omw
           ./omw --all
-
-      - name: Upload build artifacts (logs, modulefiles, bin)
-        # The 'if: always()' condition ensures this step runs even if the 'Build everything'
-        # step fails. This is crucial for capturing logs for debugging purposes.
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: omw-build-artifacts
-          path: |
-            builds/*/logs/**
-            tools/modulefiles/**
-            bin/**
