@@ -1,4 +1,5 @@
 name: CI (CentOS 7.7.1908)
+
 on:
   push:
     branches: [ "**" ]
@@ -15,21 +16,42 @@ jobs:
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
           set -euo pipefail
-          # First, install the repository definitions for EPEL and SCL.
-          # They will also point to the dead mirrorlists initially.
+          # Step 1: Overwrite the main CentOS repo file with a specific EOL configuration.
+          # This points directly to the CentOS 7.9.2009 vault.
+          cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
+          [base]
+          name=CentOS-$releasever - Base
+          baseurl=http://vault.centos.org/7.9.2009/os/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          
+          [updates]
+          name=CentOS-$releasever - Updates
+          baseurl=http://vault.centos.org/7.9.2009/updates/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          
+          [extras]
+          name=CentOS-$releasever - Extras
+          baseurl=http://vault.centos.org/7.9.2009/extras/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          EOF
+          
+          # Step 2: Install repo definitions for EPEL and SCL.
+          # These will add new .repo files that are still broken.
           yum -y install epel-release centos-release-scl
 
-          # Now, fix ALL repository files to point to the vault server since CentOS 7 is EOL.
-          # This corrects the base, updates, extras, EPEL, and SCL repositories in one go.
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
-          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+          # Step 3: Fix the newly added repo files (EPEL, SCL) by replacing the mirror domain.
+          # This command acts as a catch-all for any other repository configurations.
           sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
+          sed -i 's/mirrorlist.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
 
-          # Clean yum cache and build a new one from the vault repositories.
+          # Step 4: Clean yum cache and build a new one from the corrected vault repositories.
           yum clean all
           yum -y makecache
 
-          # Now it's safe to install all other dependencies.
+          # Step 5: Now it's safe to install all other dependencies.
           yum -y groupinstall "Development Tools"
           yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3
 
@@ -71,19 +93,39 @@ jobs:
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
           set -euo pipefail
-          # First, install the repository definitions for EPEL and SCL.
+          # Step 1: Overwrite the main CentOS repo file with a specific EOL configuration.
+          cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
+          [base]
+          name=CentOS-$releasever - Base
+          baseurl=http://vault.centos.org/7.9.2009/os/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          
+          [updates]
+          name=CentOS-$releasever - Updates
+          baseurl=http://vault.centos.org/7.9.2009/updates/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          
+          [extras]
+          name=CentOS-$releasever - Extras
+          baseurl=http://vault.centos.org/7.9.2009/extras/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          EOF
+
+          # Step 2: Install repo definitions for EPEL and SCL.
           yum -y install epel-release centos-release-scl
 
-          # Fix ALL repository files to point to the vault server.
-          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
-          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+          # Step 3: Fix the newly added repo files (EPEL, SCL).
           sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
-          
-          # Clean and rebuild cache.
+          sed -i 's/mirrorlist.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
+
+          # Step 4: Clean and rebuild cache.
           yum clean all
           yum -y makecache
 
-          # Install build dependencies, including devtoolset-11 from the now-working SCL repo.
+          # Step 5: Install build dependencies, including devtoolset-11 from the now-working SCL repo.
           yum -y groupinstall "Development Tools"
           yum -y install devtoolset-11 git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
 
