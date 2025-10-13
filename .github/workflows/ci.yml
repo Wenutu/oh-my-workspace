@@ -1,0 +1,85 @@
+name: CI (CentOS 7.7.1908)
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch: {}
+
+jobs:
+  pack:
+    name: Pack (offline bundle)
+    runs-on: ubuntu-latest
+    container: centos:7.7.1908
+    steps:
+      - name: Install base deps
+        run: |
+          set -euo pipefail
+          yum -y install epel-release centos-release-scl
+          yum -y groupinstall "Development Tools"
+          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Cache packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            packages
+          key: centos77-pack-${{ hashFiles('software.conf') }}
+      - name: Pack offline bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/profile.d/modules.sh || true
+          chmod +x ./omw
+          ./omw --pack
+      - name: Upload offline bundle and packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: omw-offline-bundle
+          path: |
+            $HOME/omw-offline-bundle-*.tar.gz
+            packages/SHA256SUMS
+            packages/**
+
+  build-all:
+    name: Build all software
+    runs-on: ubuntu-latest
+    needs: pack
+    container: centos:7.7.1908
+    timeout-minutes: 360
+    steps:
+      - name: Install build deps and toolset
+        run: |
+          set -euo pipefail
+          yum -y install epel-release centos-release-scl
+          yum -y groupinstall "Development Tools"
+          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
+          # Modern toolchain for heavy builds (e.g., GCC, Python)
+          yum -y install devtoolset-11
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Restore packages cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            packages
+          key: centos77-pack-${{ hashFiles('software.conf') }}
+      - name: Build everything
+        shell: bash
+        run: |
+          set -euo pipefail
+          source /etc/profile.d/modules.sh || true
+          source /opt/rh/devtoolset-11/enable || true
+          chmod +x ./omw
+          ./omw --all
+      - name: Upload build artifacts (logs, modulefiles, bin)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: omw-build-artifacts
+          path: |
+            builds/*/logs/**
+            tools/modulefiles/**
+            bin/**
