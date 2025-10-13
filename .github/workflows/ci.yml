@@ -52,13 +52,10 @@ jobs:
           yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3
 
       - name: Checkout
-        # CRITICAL FIX: Use v2 of this action. v4 runs on Node.js 20, which is incompatible
-        # with the old GLIBC library in CentOS 7. v2 uses Node.js 12, which is compatible.
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Cache packages
-        # CRITICAL FIX: Use v2 for GLIBC compatibility.
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: |
             packages
@@ -74,8 +71,7 @@ jobs:
           ./omw --pack
 
       - name: Upload offline bundle and packages
-        # CRITICAL FIX: Use v2 for GLIBC compatibility.
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: omw-offline-bundle
           path: |
@@ -90,12 +86,10 @@ jobs:
     container: centos:7.7.1908
     timeout-minutes: 360
     steps:
-      # This setup block is duplicated from the 'pack' job for clarity and independence.
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
           set -euo pipefail
-          # Step 1: Since CentOS 7 is End-of-Life (EOL), its standard repositories are offline.
-          # We must overwrite the main repo file to point to the official vault (archive) server.
+          # Step 1: Point to the CentOS 7 vault repositories.
           cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
           [base]
           name=CentOS-$releasever - Base
@@ -124,17 +118,15 @@ jobs:
           yum clean all
           yum -y makecache
 
-          # Step 4: Install build dependencies, including devtoolset-11 from the now-working SCL repo.
+          # Step 4: Install build dependencies, including devtoolset-11.
           yum -y groupinstall "Development Tools"
           yum -y install devtoolset-11 git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
 
       - name: Checkout
-        # CRITICAL FIX: Use v2 for GLIBC compatibility.
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Restore packages cache
-        # CRITICAL FIX: Use v2 for GLIBC compatibility.
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         with:
           path: |
             packages
@@ -146,8 +138,7 @@ jobs:
           set -euo pipefail
           # Source the environment modules script.
           source /etc/profile.d/modules.sh || true
-          # CRITICAL STEP: Enable the modern GCC toolchain from SCL. This command
-          # modifies the current shell's PATH to prioritize the GCC 11 compiler.
+          # Enable the modern GCC toolchain from SCL for the build process.
           source /opt/rh/devtoolset-11/enable || true
           chmod +x ./omw
           ./omw --all
@@ -156,8 +147,7 @@ jobs:
         # The 'if: always()' condition ensures this step runs even if the 'Build everything'
         # step fails. This is crucial for capturing logs for debugging purposes.
         if: always()
-        # CRITICAL FIX: Use v2 for GLIBC compatibility.
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: omw-build-artifacts
           path: |
