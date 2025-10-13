@@ -1,5 +1,4 @@
 name: CI (CentOS 7.7.1908)
-
 on:
   push:
     branches: [ "**" ]
@@ -13,34 +12,46 @@ jobs:
     runs-on: ubuntu-latest
     container: centos:7.7.1908
     steps:
-      - name: Fix CentOS 7 YUM repository to vault.centos.org
+      - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
           set -euo pipefail
-          sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-*.repo || true
-          sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo || true
+          # First, install the repository definitions for EPEL and SCL.
+          # They will also point to the dead mirrorlists initially.
+          yum -y install epel-release centos-release-scl
+
+          # Now, fix ALL repository files to point to the vault server since CentOS 7 is EOL.
+          # This corrects the base, updates, extras, EPEL, and SCL repositories in one go.
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+          sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
+
+          # Clean yum cache and build a new one from the vault repositories.
           yum clean all
           yum -y makecache
-      - name: Install base deps
-        run: |
-          set -euo pipefail
-          yum -y install epel-release centos-release-scl
+
+          # Now it's safe to install all other dependencies.
           yum -y groupinstall "Development Tools"
           yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3
+
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Cache packages
         uses: actions/cache@v4
         with:
           path: |
             packages
           key: centos77-pack-${{ hashFiles('software.conf') }}
+
       - name: Pack offline bundle
         shell: bash
         run: |
           set -euo pipefail
+          # Source environment modules script if it exists.
           source /etc/profile.d/modules.sh || true
           chmod +x ./omw
           ./omw --pack
+
       - name: Upload offline bundle and packages
         uses: actions/upload-artifact@v4
         with:
@@ -57,42 +68,46 @@ jobs:
     container: centos:7.7.1908
     timeout-minutes: 360
     steps:
-      - name: Fix CentOS 7 YUM repository to vault.centos.org
+      - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
           set -euo pipefail
-          sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-*.repo || true
-          sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo || true
-          yum clean all
-          yum -y makecache
-      - name: Install build deps and toolset
-        run: |
-          set -euo pipefail
+          # First, install the repository definitions for EPEL and SCL.
           yum -y install epel-release centos-release-scl
-          # SCL repos are also down, fix them too
-          sed -i 's|^mirrorlist=|#mirrorlist=|g' /etc/yum.repos.d/CentOS-SCLo-*.repo || true
-          sed -i 's|^#baseurl=http://mirror.centos.org|baseurl=https://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-*.repo || true
+
+          # Fix ALL repository files to point to the vault server.
+          sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
+          sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+          sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
+          
+          # Clean and rebuild cache.
           yum clean all
           yum -y makecache
+
+          # Install build dependencies, including devtoolset-11 from the now-working SCL repo.
           yum -y groupinstall "Development Tools"
-          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
-          # Modern toolchain for heavy builds (e.g., GCC, Python)
-          yum -y install devtoolset-11
+          yum -y install devtoolset-11 git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
+
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Restore packages cache
         uses: actions/cache@v4
         with:
           path: |
             packages
           key: centos77-pack-${{ hashFiles('software.conf') }}
+
       - name: Build everything
         shell: bash
         run: |
           set -euo pipefail
+          # Source environment modules script.
           source /etc/profile.d/modules.sh || true
+          # Enable the modern GCC toolchain from SCL. This is crucial.
           source /opt/rh/devtoolset-11/enable || true
           chmod +x ./omw
           ./omw --all
+
       - name: Upload build artifacts (logs, modulefiles, bin)
         if: always()
         uses: actions/upload-artifact@v4
