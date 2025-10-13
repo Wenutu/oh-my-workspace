@@ -71,7 +71,7 @@ jobs:
           ./omw --pack
 
       - name: Upload offline bundle and packages
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: omw-offline-bundle
           path: |
@@ -147,7 +147,7 @@ jobs:
         # The 'if: always()' condition ensures this step runs even if the 'Build everything'
         # step fails. This is crucial for capturing logs for debugging purposes.
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: omw-build-artifacts
           path: |
