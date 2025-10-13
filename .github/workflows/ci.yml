@@ -8,23 +8,24 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  pack:
-    name: Pack (offline bundle)
+  _prepare:
     runs-on: ubuntu-latest
-    container: centos:7.7.1908
+    outputs:
+      prepare-step: ${{ toJSON(steps.prepare) }}
     steps:
-      - name: Prepare CentOS 7 EOL Environment and Install Dependencies
+      - id: prepare
+        name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
           set -euo pipefail
-          # Step 1: Overwrite the main CentOS repo file with a specific EOL configuration.
-          # This points directly to the CentOS 7.9.2009 vault.
+          # Step 1: Since CentOS 7 is End-of-Life (EOL), its standard repositories are offline.
+          # We must overwrite the main repo file to point to the official vault (archive) server.
           cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
           [base]
           name=CentOS-$releasever - Base
           baseurl=http://vault.centos.org/7.9.2009/os/$basearch/
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-          
+
           [updates]
           name=CentOS-$releasever - Updates
           baseurl=http://vault.centos.org/7.9.2009/updates/$basearch/
@@ -38,24 +39,35 @@ jobs:
           gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
           EOF
 
-          # Step 2: Fix the newly added repo files (EPEL, SCL) by replacing the mirror domain.
-          # This command acts as a catch-all for any other repository configurations.
+          # Step 2: Fix other repository files (like EPEL, SCL) by replacing the defunct mirror domains
+          # with the vault domain. This is a catch-all for any other .repo files.
           sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
           sed -i 's/mirrorlist.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
 
-          # Step 3: Clean yum cache and build a new one from the corrected vault repositories.
+          # Step 3: Clean the yum cache and build a new one from the corrected vault repositories.
           yum clean all
           yum -y makecache
 
-          # Step 4: Now it's safe to install all other dependencies.
+          # Step 4: Now it's safe to install all necessary dependencies.
+          # 'Development Tools' provides a base set of compilers and build tools.
+          # 'devtoolset-11' provides a modern GCC 11 compiler via Software Collections (SCL).
           yum -y groupinstall "Development Tools"
-          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3
+          yum -y install devtoolset-11 git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
+
+  pack:
+    name: Pack (offline bundle)
+    runs-on: ubuntu-latest
+    needs: _prepare
+    container: centos:7.7.1908
+    steps:
+      - name: ${{ fromJSON(needs._prepare.outputs.prepare-step).name }}
+        run: ${{ fromJSON(needs._prepare.outputs.prepare-step).run }}
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
 
       - name: Cache packages
-        uses: actions/cache@v4
+        uses: actions/cache@v2
         with:
           path: |
             packages
@@ -65,13 +77,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Source environment modules script if it exists.
+          # Source the environment modules script to make the 'module' command available.
           source /etc/profile.d/modules.sh || true
           chmod +x ./omw
           ./omw --pack
 
       - name: Upload offline bundle and packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v2
         with:
           name: omw-offline-bundle
           path: |
@@ -82,51 +94,18 @@ jobs:
   build-all:
     name: Build all software
     runs-on: ubuntu-latest
-    needs: pack
+    needs: [pack, _prepare]
     container: centos:7.7.1908
     timeout-minutes: 360
     steps:
-      - name: Prepare CentOS 7 EOL Environment and Install Dependencies
-        run: |
-          set -euo pipefail
-          # Step 1: Overwrite the main CentOS repo file with a specific EOL configuration.
-          cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
-          [base]
-          name=CentOS-$releasever - Base
-          baseurl=http://vault.centos.org/7.9.2009/os/$basearch/
-          gpgcheck=1
-          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-
-          [updates]
-          name=CentOS-$releasever - Updates
-          baseurl=http://vault.centos.org/7.9.2009/updates/$basearch/
-          gpgcheck=1
-          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-
-          [extras]
-          name=CentOS-$releasever - Extras
-          baseurl=http://vault.centos.org/7.9.2009/extras/$basearch/
-          gpgcheck=1
-          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-          EOF
-
-          # Step 2: Fix the newly added repo files (EPEL, SCL).
-          sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
-          sed -i 's/mirrorlist.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
-
-          # Step 3: Clean and rebuild cache.
-          yum clean all
-          yum -y makecache
-
-          # Step 4: Install build dependencies, including devtoolset-11 from the now-working SCL repo.
-          yum -y groupinstall "Development Tools"
-          yum -y install devtoolset-11 git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
+      - name: ${{ fromJSON(needs._prepare.outputs.prepare-step).name }}
+        run: ${{ fromJSON(needs._prepare.outputs.prepare-step).run }}
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
 
       - name: Restore packages cache
-        uses: actions/cache@v4
+        uses: actions/cache@v2
         with:
           path: |
             packages
@@ -136,16 +115,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Source environment modules script.
+          # Source the environment modules script.
           source /etc/profile.d/modules.sh || true
-          # Enable the modern GCC toolchain from SCL. This is crucial.
+          # CRITICAL STEP: Enable the modern GCC toolchain from SCL. This command
+          # modifies the current shell's PATH to prioritize the GCC 11 compiler.
           source /opt/rh/devtoolset-11/enable || true
           chmod +x ./omw
           ./omw --all
 
       - name: Upload build artifacts (logs, modulefiles, bin)
+        # The 'if: always()' condition ensures this step runs even if the 'Build everything'
+        # step fails. This is crucial for capturing logs for debugging purposes.
         if: always()
-        uses: actions/upload-artifact@v4
+        # CRITICAL FIX: Use v2 for GLIBC compatibility.
+        uses: actions/upload-artifact@v2
         with:
           name: omw-build-artifacts
           path: |
