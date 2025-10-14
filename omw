@@ -127,14 +127,18 @@ download_package() {
 	log "Downloading $(basename "$dest")" "INFO"
 	mkdir -p "$(dirname "$dest")"
 	for ((i = 1; i <= MAX_RETRIES; i++)); do
-		if wget --tries=1 --timeout="$DOWNLOAD_TIMEOUT" -O "$dest" "$url" &>/dev/null && [[ $(stat -c%s "$dest") -gt 100 ]]; then
+		local log_file
+		log_file=$(mktemp)
+		if wget --tries=1 --timeout="$DOWNLOAD_TIMEOUT" -o "$log_file" -O "$dest" "$url" && [[ $(stat -c%s "$dest") -gt 100 ]]; then
+			rm -f "$log_file"
 			log "Download successful." "SUCCESS"
 			return 0
 		fi
 		log "Download attempt $i failed. Retrying..." "WARN"
-		sleep $((i * 2))
 	done
-	log "Failed to download $url." "ERROR"
+	log "Failed to download $url. Last attempt log:" "ERROR"
+	cat "$log_file" >&2
+	rm -f "$log_file"
 	return 1
 }
 
@@ -531,27 +535,32 @@ build_local() {
 	mkdir -p "$prefix"
 	log "Extracting RPMs to $prefix..." "INFO"
 	pushd "$prefix" >/dev/null
-	find "$rpm_dir" -maxdepth 1 -name "*.rpm" -print0 | while IFS= read -r -d $'\0' rpm; do rpm2cpio "$rpm" | cpio -idmv; done
+	find "$rpm_dir" -maxdepth 1 -name "*.rpm" -print0 | while IFS= read -r -d $'\0' rpm; do rpm2cpio "$rpm" | cpio -idmv > /dev/null; done
 	popd >/dev/null
 
 	# Fix broken symlinks and pkg-config files after extraction
-	find "$prefix" -type l -exec bash -c '
-    link="$0"
-    target=$(readlink "$link")
-    if [[ ! -e "$link" ]]; then
-      # Attempt to fix common absolute path links
-      new_target="/$target"
-      if [[ -e "$new_target" ]]; then
-        ln -snf "$new_target" "$link"
-      else
-        echo "WARN: Broken symlink detected: $link -> $target" >&2
-      fi
-    fi
-  ' {} \;
+	find "$prefix" -type l -print0 | while IFS= read -r -d $'\0' link; do
+		# The same logic as before, but inside a loop
+		target=$(readlink "$link")
+		if [[ ! -e "$link" ]]; then
+		new_target="/$target"
+		if [[ -e "$new_target" ]]; then
+			ln -snf "$new_target" "$link"
+		else
+			# Using log function for consistency
+			log "Broken symlink detected: $link -> $target" "WARN"
+		fi
+		fi
+	done
 
-	find "$prefix" -name "*.pc" -exec sed -i "s|=/usr|=$prefix/usr|g" {} +
-	find "$prefix" -name "*.pc" -exec sed -i "s|-I/usr|-I$prefix/usr|g" {} +
-	find "$prefix" -name "*.pc" -exec sed -i "s|-L/usr|-L$prefix/usr|g" {} +
+	# find "$prefix" -name "*.pc" -exec sed -i "s|=/usr|=$prefix/usr|g" {} +
+	# find "$prefix" -name "*.pc" -exec sed -i "s|-I/usr|-I$prefix/usr|g" {} +
+	# find "$prefix" -name "*.pc" -exec sed -i "s|-L/usr|-L$prefix/usr|g" {} +
+	find "$prefix" -name "*.pc" -exec sed -i \
+    -e "s|=/usr|=$prefix/usr|g" \
+    -e "s|-I/usr|-I$prefix/usr|g" \
+    -e "s|-L/usr|-L$prefix/usr|g" \
+    {} +
 
 	write_modulefile "local" "$version"
 	local modulefile_path="$MODULEFILES_PATH/local/local-$version"
