@@ -60,6 +60,7 @@ init_globals() {
 	readonly DOWNLOAD_TIMEOUT=300
 	readonly GCC_PREREQ_BASE_URL='http://gcc.gnu.org/pub/gcc/infrastructure/'
 	log "Initialization complete. Using up to $BUILD_JOBS jobs for builds." "INFO"
+	return 0
 }
 
 ###############################################################################
@@ -111,6 +112,7 @@ check_sys_deps() {
 	done
 	if ((missing_deps)); then exit 1; fi
 	log "System dependencies are satisfied." "SUCCESS"
+	return 0
 }
 
 download_package() {
@@ -822,7 +824,7 @@ main() {
 			command="$1"
 			shift
 			# These commands do not take a target argument
-			if [[ "$command" != "--install-all-apps" && "$command" != "-p" && "$command" != "-a" && "$command" != "--verify-offline" ]]; then
+			if [[ "$command" != "--install-all-apps" && "$command" != "-p" && "$command" != "--pack" && "$command" != "-a" && "$command" != "-all" && "$command" != "--verify-offline" ]]; then
 				target="$1"
 				shift
 			fi
