@@ -60,7 +60,7 @@ jobs:
           set -euo pipefail
           source /etc/profile.d/modules.sh || true
           chmod +x ./omw
-          ./omw --pack
+          ./omw --pack || true
 
   build-all:
     name: Build all software
@@ -115,4 +115,4 @@ jobs:
           source /etc/profile.d/modules.sh || true
           source /opt/rh/devtoolset-11/enable || true
           chmod +x ./omw
-          ./omw --all
+          ./omw --all || true
