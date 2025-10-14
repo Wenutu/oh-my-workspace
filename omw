@@ -824,7 +824,7 @@ main() {
 			command="$1"
 			shift
 			# These commands do not take a target argument
-			if [[ "$command" != "--install-all-apps" && "$command" != "-p" && "$command" != "--pack" && "$command" != "-a" && "$command" != "-all" && "$command" != "--verify-offline" ]]; then
+			if [[ "$command" != "--install-all-apps" && "$command" != "-p" && "$command" != "--pack" && "$command" != "-a" && "$command" != "--all" && "$command" != "--verify-offline" ]]; then
 				target="$1"
 				shift
 			fi
