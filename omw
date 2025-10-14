@@ -203,7 +203,7 @@ prefetch_gcc_prereqs() {
 	# Extract just to parse the prerequisites script
 	rm -rf "$tmp_dir"
 	mkdir -p "$tmp_dir"
-	extract_package "$gcc_pkg" "$tmp_dir" 0
+	extract_package "$gcc_pkg" "$tmp_dir" 1
 
 	local prereq_pkgs
 	mapfile -t prereq_pkgs < <(_get_gcc_prereq_pkgs "$tmp_dir")
