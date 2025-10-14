@@ -16,46 +16,39 @@ jobs:
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
           set -euo pipefail
-          # Step 1: Since CentOS 7 is End-of-Life (EOL), its standard repositories are offline.
-          # We must overwrite the main repo file to point to the official vault (archive) server.
+          # Step 1: Point to the CentOS 7 vault repositories as it's EOL.
           cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
           [base]
           name=CentOS-$releasever - Base
           baseurl=http://vault.centos.org/7.9.2009/os/$basearch/
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-          
           [updates]
           name=CentOS-$releasever - Updates
           baseurl=http://vault.centos.org/7.9.2009/updates/$basearch/
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-
           [extras]
           name=CentOS-$releasever - Extras
           baseurl=http://vault.centos.org/7.9.2009/extras/$basearch/
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
           EOF
-
-          # Step 2: Fix other repository files (like EPEL, SCL) by replacing the defunct mirror domains
-          # with the vault domain. This is a catch-all for any other .repo files.
           sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
           sed -i 's/mirrorlist.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
-
-          # Step 3: Clean the yum cache and build a new one from the corrected vault repositories.
           yum clean all
           yum -y makecache
-
-          # Step 4: Now it's safe to install all necessary dependencies for this job.
           yum -y groupinstall "Development Tools"
           yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3
 
       - name: Checkout
-        uses: actions/checkout@v3
+        # CRITICAL FIX: Pin to a specific v3.x.x version that is known to use Node.js 16.
+        # This avoids issues with floating tags and runner overrides.
+        uses: actions/checkout@v3.6.0
 
       - name: Cache packages
-        uses: actions/cache@v3
+        # CRITICAL FIX: Pin to a specific v3.x.x version.
+        uses: actions/cache@v3.3.3
         with:
           path: |
             packages
@@ -65,10 +58,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Source the environment modules script to make the 'module' command available.
           source /etc/profile.d/modules.sh || true
           chmod +x ./omw
           ./omw --pack
+
+      - name: Upload offline bundle and packages
+        # CRITICAL FIX: Pin to a specific v3.x.x version.
+        uses: actions/upload-artifact@v3.1.3
+        with:
+          name: omw-offline-bundle
+          path: |
+            $HOME/omw-offline-bundle-*.tar.gz
+            packages/SHA256SUMS
+            packages/**
 
   build-all:
     name: Build all software
@@ -80,44 +82,36 @@ jobs:
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
           set -euo pipefail
-          # Step 1: Point to the CentOS 7 vault repositories.
           cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
           [base]
           name=CentOS-$releasever - Base
           baseurl=http://vault.centos.org/7.9.2009/os/$basearch/
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-
           [updates]
           name=CentOS-$releasever - Updates
           baseurl=http://vault.centos.org/7.9.2009/updates/$basearch/
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-
           [extras]
           name=CentOS-$releasever - Extras
           baseurl=http://vault.centos.org/7.9.2009/extras/$basearch/
           gpgcheck=1
           gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
           EOF
-
-          # Step 2: Fix other repository files (like EPEL, SCL).
           sed -i 's/mirror.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
           sed -i 's/mirrorlist.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
-
-          # Step 3: Clean and rebuild cache.
           yum clean all
           yum -y makecache
-
-          # Step 4: Install build dependencies, including devtoolset-11.
-          yum -y groupinstall "Development Tools"
           yum -y install devtoolset-11 git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
 
       - name: Checkout
-        uses: actions/checkout@v3
+        # CRITICAL FIX: Pin to a specific v3.x.x version.
+        uses: actions/checkout@v3.6.0
 
       - name: Restore packages cache
-        uses: actions/cache@v3
+        # CRITICAL FIX: Pin to a specific v3.x.x version.
+        uses: actions/cache@v3.3.3
         with:
           path: |
             packages
@@ -127,9 +121,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Source the environment modules script.
           source /etc/profile.d/modules.sh || true
-          # Enable the modern GCC toolchain from SCL for the build process.
           source /opt/rh/devtoolset-11/enable || true
           chmod +x ./omw
           ./omw --all
+
+      - name: Upload build artifacts (logs, modulefiles, bin)
+        if: always()
+        # CRITICAL FIX: Pin to a specific v3.x.x version.
+        uses: actions/upload-artifact@v3.1.3
+        with:
+          name: omw-build-artifacts
+          path: |
+            builds/*/logs/**
+            tools/modulefiles/**
+            bin/**
