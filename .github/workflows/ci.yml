@@ -76,7 +76,8 @@ jobs:
             echo "Error: Offline bundle file not found!"
             exit 1
           fi
-          tar -xzf $HOME/omw-offline-bundle-test.tar.gz
+          mkdir oh-my-workspace
           cd oh-my-workspace
+          tar -xzf $HOME/omw-offline-bundle-test.tar.gz
           chmod +x ./omw
           ./omw --all
