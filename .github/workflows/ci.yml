@@ -46,14 +46,6 @@ jobs:
         # This avoids issues with floating tags and runner overrides.
         uses: actions/checkout@v3.6.0
 
-      - name: Cache packages
-        # CRITICAL FIX: Pin to a specific v3.x.x version.
-        uses: actions/cache@v3.3.3
-        with:
-          path: |
-            packages
-          key: centos77-pack-${{ hashFiles('software.conf') }}
-
       - name: Pack offline bundle
         shell: bash
         run: |
@@ -93,19 +85,11 @@ jobs:
           sed -i 's/mirrorlist.centos.org/vault.centos.org/g' /etc/yum.repos.d/*.repo
           yum clean all
           yum -y makecache
-          yum -y install devtoolset-11 git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
+          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
 
       - name: Checkout
         # CRITICAL FIX: Pin to a specific v3.x.x version.
         uses: actions/checkout@v3.6.0
-
-      - name: Restore packages cache
-        # CRITICAL FIX: Pin to a specific v3.x.x version.
-        uses: actions/cache@v3.3.3
-        with:
-          path: |
-            packages
-          key: centos77-pack-${{ hashFiles('software.conf') }}
 
       - name: Build everything
         shell: bash
