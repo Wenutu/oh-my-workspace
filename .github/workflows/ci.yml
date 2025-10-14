@@ -60,13 +60,21 @@ jobs:
           source /etc/profile.d/modules.sh
           chmod +x ./omw
           ./omw --pack
+          echo "--- Debugging file location ---"
+          echo "Current directory is: $(pwd)"
+          echo "Listing contents of current directory:"
+          ls -la .
+          echo "Listing contents of /root:"
+          ls -la /root
+          echo "Listing contents of parent directory:"
+          ls -la ..
 
       - name: Build everything from offline bundle
         shell: bash
         run: |
           source /etc/profile.d/modules.sh
           # Move the bundle to the parent directory to simulate a real offline scenario
-          mv /root/omw-offline-bundle-*.tar.gz ..
+          # mv ../omw-offline-bundle-*.tar.gz ..
           cd ..
           # Clean the original source directory
           rm -rf oh-my-workspace
