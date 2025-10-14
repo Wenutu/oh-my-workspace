@@ -41,10 +41,18 @@ jobs:
           yum -y groupinstall "Development Tools"
           yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3
 
-      - name: Checkout
-        # CRITICAL FIX: Pin to a specific v3.x.x version that is known to use Node.js 16.
-        # This avoids issues with floating tags and runner overrides.
-        uses: actions/checkout@v3.6.0
+      - name: Manual Checkout
+        # The actions/checkout@v3+ uses Node.js 20, which is incompatible with CentOS 7's old GLIBC.
+        # We are replacing it with a manual git clone to avoid this dependency.
+        run: |
+          set -euxo pipefail
+          # Clone the repository into the current workspace directory (.).
+          # This uses the GITHUB_TOKEN for authentication, which works for both public and private repositories.
+          git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" .
+          
+          # Check out the specific commit that triggered the workflow.
+          # The ${{ github.sha }} context variable provides the correct commit SHA for both 'push' and 'pull_request' events.
+          git checkout "${{ github.sha }}"
 
       - name: Pack offline bundle
         shell: bash
@@ -87,9 +95,18 @@ jobs:
           yum -y makecache
           yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio rpm2cpio yum-utils environment-modules xz bzip2 python3
 
-      - name: Checkout
-        # CRITICAL FIX: Pin to a specific v3.x.x version.
-        uses: actions/checkout@v3.6.0
+      - name: Manual Checkout
+        # The actions/checkout@v3+ uses Node.js 20, which is incompatible with CentOS 7's old GLIBC.
+        # We are replacing it with a manual git clone to avoid this dependency.
+        run: |
+          set -euxo pipefail
+          # Clone the repository into the current workspace directory (.).
+          # This uses the GITHUB_TOKEN for authentication, which works for both public and private repositories.
+          git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" .
+          
+          # Check out the specific commit that triggered the workflow.
+          # The ${{ github.sha }} context variable provides the correct commit SHA for both 'push' and 'pull_request' events.
+          git checkout "${{ github.sha }}"
 
       - name: Build everything
         shell: bash
