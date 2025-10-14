@@ -65,7 +65,7 @@ jobs:
           echo "Listing contents of current directory:"
           ls -la .
           echo "Listing contents of /root:"
-          ls -la /root
+          ls -la $HOME
           echo "Listing contents of parent directory:"
           ls -la ..
 
@@ -74,7 +74,7 @@ jobs:
         run: |
           source /etc/profile.d/modules.sh
           # Move the bundle to the parent directory to simulate a real offline scenario
-          # mv ../omw-offline-bundle-*.tar.gz ..
+          mv $HOME/omw-offline-bundle-*.tar.gz ..
           cd ..
           # Clean the original source directory
           rm -rf oh-my-workspace

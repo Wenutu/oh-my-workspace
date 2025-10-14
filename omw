@@ -801,9 +801,9 @@ create_offline_bundle() {
 	cd "$OMW_HOME"
 	# Exclude directories that are generated on the target machine
 	tar --exclude="*.git" --exclude="./builds" --exclude="./bin" --exclude="./tools" --exclude="./apps" \
-		-czvf "$HOME/$archive_name" .
+		-czf "$HOME/$archive_name" .
 	log "Offline bundle created successfully!" "SUCCESS"
-	log "To use, transfer '$archive_name' to an offline machine, extract it, and run './omw --all'" "INFO"
+	log "To use, transfer '$HOME/$archive_name' to an offline machine, extract it, and run './omw --all'" "INFO"
 }
 
 ###############################################################################
