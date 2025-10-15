@@ -467,7 +467,10 @@ build_software() {
 		module load "$dep/$dep-${SOFTWARE_VERSIONS[$dep]}"
 		log "Loaded module for dependency: $dep" "INFO"
 	done
-
+	if [[ -z "$url" ]]; then
+		log "No URL defined for $appname in configuration. Cannot proceed." "ERROR"
+		return 1
+	fi
 	download_package "$url" "$pkg_path"
 	extract_package "$pkg_path" "$build_dir"
 
