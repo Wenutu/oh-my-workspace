@@ -59,7 +59,18 @@ init_globals() {
 	readonly MAX_RETRIES=3
 	readonly DOWNLOAD_TIMEOUT=300
 	readonly GCC_PREREQ_BASE_URL='http://gcc.gnu.org/pub/gcc/infrastructure/'
+
+    readonly SPINNER_ENABLED
+    if [[ -z "$OMW_NO_SPINNER" ]]; then
+        SPINNER_ENABLED=true
+    else
+        SPINNER_ENABLED=false
+    fi
+
 	log "Initialization complete. Using up to $BUILD_JOBS jobs for builds." "INFO"
+    if [[ "$SPINNER_ENABLED" == "false" ]]; then
+        log "Running in non-interactive mode or CI environment. Spinner is disabled." "INFO"
+    fi
 	return 0
 }
 
@@ -76,6 +87,8 @@ log() {
 }
 
 start_spinner() {
+    # MODIFICATION: Only start spinner if it's enabled globally.
+    [[ "$SPINNER_ENABLED" == "false" ]] && return 0
 	spinner &
 	spinner_pid=$!
 }
@@ -88,7 +101,8 @@ stop_spinner() {
 		spinner_pid=""
 	fi
 	# Clear the line where the spinner was
-	echo -ne "\r\033[K" >&2
+    # MODIFICATION: Only clear the line if spinner was enabled to avoid printing extra newlines.
+    [[ "$SPINNER_ENABLED" == "true" ]] && echo -ne "\r\033[K" >&2
 }
 
 spinner() {
@@ -249,7 +263,7 @@ verify_offline() {
 		[[ -f "$p" ]] || missing+=("$p")
 	done
 
-	# 2) GCC prerequisites
+	# 2) GCC prerequisites (if GCC is defined in config)
 	local gcc_url="${SOFTWARE_URLS[gcc]}"
 	if [[ -n "$gcc_url" ]]; then
 		local gcc_pkg="$PACKAGES_PATH/software/$(basename "$gcc_url")"
@@ -864,7 +878,15 @@ main() {
 	# Command execution
 	case "$command" in
 	-a | --all)
-		for sw in "${SOFTWARE_LIST[@]}"; do build_software "$sw" "$force" "$refresh"; done
+        # Loop through all software, but skip 'gcc' as it's a large, optional component.
+        # It can be built explicitly with '--build gcc'.
+		for sw in "${SOFTWARE_LIST[@]}"; do 
+            if [[ "$sw" == "gcc" ]]; then
+                log "Skipping optional software 'gcc' in --all build. Build it explicitly with '--build gcc'." "INFO"
+                continue
+            fi
+            build_software "$sw" "$force" "$refresh"
+        done
 		for app in "${APP_LIST[@]}"; do install_app "$app" "$force"; done
 		configure "tmux"
 		configure "zsh"
@@ -924,8 +946,8 @@ main() {
 			OMW - A self-contained development environment manager.
 
 			Commands:
-			  -a, --all               Install all software, apps, and apply configurations.
-			  -b, --build <software>  Build specific software from source (e.g., vim).
+			  -a, --all               Install all software (except optional ones like gcc), apps, and apply configurations.
+			  -b, --build <software>  Build specific software from source (e.g., vim, gcc).
 			  -i, --install <app>     Install a specific pre-compiled app (e.g., eza).
 			  --install-all-apps      Install all pre-compiled apps.
 			  -c, --config <target>   Configure a specific tool ('tmux' or 'zsh').
@@ -941,6 +963,9 @@ main() {
 			Examples:
 			  # Build vim from source, forcing a rebuild if it exists
 			  $0 --build vim --force
+
+              # Build the optional gcc compiler
+              $0 --build gcc
 
 			  # Install the eza command-line tool
 			  $0 --install eza

@@ -46,6 +46,7 @@ jobs:
         # We are replacing it with a manual git clone to avoid this dependency.
         run: |
           set -euxo pipefail
+          export OMW_NO_SPINNER=1
           # Clone the repository into the current workspace directory (.).
           # This uses the GITHUB_TOKEN for authentication, which works for both public and private repositories.
           git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" .
@@ -67,6 +68,7 @@ jobs:
         shell: bash
         run: |
           source /etc/profile.d/modules.sh
+          export OMW_NO_SPINNER=1
           # Move the bundle to the parent directory to simulate a real offline scenario
           cd $HOME
           # Clean the original source directory
