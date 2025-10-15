@@ -13,6 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     container: centos:7.7.1908
     timeout-minutes: 360
+
+    # Add an environment variable for the entire job
+    # This ensures OMW_NO_SPINNER is set for all subsequent steps
+    env:
+      OMW_NO_SPINNER: 1
+
     steps:
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
@@ -46,7 +52,7 @@ jobs:
         # We are replacing it with a manual git clone to avoid this dependency.
         run: |
           set -euxo pipefail
-          export OMW_NO_SPINNER=1
+          # No need to export OMW_NO_SPINNER here anymore, it's inherited from the job's env
           # Clone the repository into the current workspace directory (.).
           # This uses the GITHUB_TOKEN for authentication, which works for both public and private repositories.
           git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" .
@@ -68,7 +74,7 @@ jobs:
         shell: bash
         run: |
           source /etc/profile.d/modules.sh
-          export OMW_NO_SPINNER=1
+          # No need to export OMW_NO_SPINNER here anymore
           # Move the bundle to the parent directory to simulate a real offline scenario
           cd $HOME
           # Clean the original source directory
