@@ -345,7 +345,10 @@ execute_build_steps() {
 _build_ncurses() {
 	local build_dir="$1"
 	local prefix="$2"
-	local config_cmd="./configure --prefix=$prefix --with-shared --enable-pc-files --enable-widec"
+	# local config_cmd="./configure --prefix=$prefix --with-shared --enable-pc-files --enable-widec"
+	local config_cmd="./configure --prefix=$prefix --with-normal --disable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
+	execute_build_steps "$build_dir" "$config_cmd" "$prefix"
+	config_cmd="./configure --prefix=$prefix --with-normal --enable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
 	execute_build_steps "$build_dir" "$config_cmd" "$prefix"
 }
 
