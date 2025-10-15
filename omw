@@ -441,25 +441,37 @@ build_software() {
 	local pkg_path="$PACKAGES_PATH/software/$(basename "$url")"
 	local build_dir="$BUILDS_PATH/$appname-$version"
 
-	# build local
+	# Special handling for 'local' target
 	if [[ "$appname" == "local" ]]; then
-		build_local $force $refresh
+		build_local "$force" "$refresh"
 		return 0
 	fi
 
 	log "--- Building $appname $version ---" "INFO"
+
 	if [[ "$refresh" == "true" ]]; then
 		log "Refreshing modulefile for $appname." "INFO"
 		write_modulefile "$appname" "$version"
 		log "$appname modulefile refreshed." "SUCCESS"
 		return 0
 	fi
+
+	if [[ -n "$deps" ]]; then
+		log "Processing dependencies for $appname: $deps" "DEBUG"
+		local dep # Ensure 'dep' is local to this function's scope
+		for dep in $deps; do
+			build_software "$dep"
+			log "Loading module for dependency: $dep" "INFO"
+			module load "$dep/$dep-${SOFTWARE_VERSIONS[$dep]}"
+		done
+	fi
+
 	if [[ -d "$prefix" && "$force" == "false" ]]; then
-		# refresh modulefile in case it was deleted
 		write_modulefile "$appname" "$version"
 		log "$appname already installed. Skipping." "INFO"
 		return 0
 	fi
+
 	if [[ "$force" == "true" && -d "$prefix" ]]; then
 		local backup_dir="${prefix}-backup-$(date +%Y%m%d%H%M%S)"
 		log "Force build: backing up existing installation to $backup_dir" "WARN"
@@ -467,12 +479,6 @@ build_software() {
 	fi
 	rm -rf "$build_dir"
 
-	local dep
-	for dep in $deps; do
-		build_software "$dep"
-		module load "$dep/$dep-${SOFTWARE_VERSIONS[$dep]}"
-		log "Loaded module for dependency: $dep" "INFO"
-	done
 	if [[ -z "$url" ]]; then
 		log "No URL defined for $appname in configuration. Cannot proceed." "ERROR"
 		return 1
