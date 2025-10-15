@@ -531,7 +531,7 @@ build_local() {
 	if [[ ! -f "$pkg_path" ]]; then
 		log "Downloading system RPMs..."
 		local rpms_to_download=(
-			"gtk3-devel" "libX11-devel" "libXt-devel" "libSM-devel" " perl-ExtUtils-ParseXS"
+			"gtk3-devel" "libX11-devel" "libXt-devel" "libSM-devel" "perl-ExtUtils-ParseXS"
 			"libICE-devel" "libXpm-devel" "xorg-x11-proto-devel"
 			"perl-ExtUtils-Embed" "help2man" "libXft-devel"
 			"freetype-devel" "zlib-devel" "bzip2-devel" "libffi-devel"

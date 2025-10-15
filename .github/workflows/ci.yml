@@ -47,7 +47,7 @@ jobs:
           yum -y makecache
           yum -y groupinstall "Development Tools"
           # Add curl and jq for the release step
-          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3 rpm2cpio ncurses-devel curl jq
+          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3 rpm2cpio ncurses-devel curl jq perl-ExtUtils-ParseXS
 
       - name: Manual Checkout
         run: |
