@@ -299,6 +299,12 @@ execute_build_steps() {
 	mkdir -p "$log_dir"
 	pushd "$build_dir" >/dev/null
 
+	log "Build prefix: $prefix" "DEBUG"
+	log "CFLAGS: $CFLAGS" "DEBUG"
+	log "LDFLAGS: $LDFLAGS" "DEBUG"
+	log "LD_LIBRARY_PATH: $LD_LIBRARY_PATH" "DEBUG"
+	log "PKG_CONFIG_PATH: $PKG_CONFIG_PATH" "DEBUG"
+
 	for step in "configure" "make" "install"; do
 		local cmd
 		local log_file
@@ -538,7 +544,9 @@ build_local() {
 	mkdir -p "$prefix"
 	log "Extracting RPMs to $prefix..." "INFO"
 	pushd "$prefix" >/dev/null
-	find "$rpm_dir" -maxdepth 1 -name "*.rpm" -print0 | while IFS= read -r -d $'\0' rpm; do rpm2cpio "$rpm" | cpio -idmv > /dev/null; done
+	find "$rpm_dir" -maxdepth 1 -name "*.rpm" -print0 | while IFS= read -r -d $'\0' rpm; do
+		rpm2cpio "$rpm" | cpio -idm --quiet
+	done
 	popd >/dev/null
 
 	# Fix broken symlinks and pkg-config files after extraction
