@@ -87,8 +87,7 @@ stop_spinner() {
 		wait "$spinner_pid" 2>/dev/null
 		spinner_pid=""
 	fi
-	# Clear the line where the spinner was
-    [[ "$OMW_NO_SPINNER" == "1" ]] && echo -ne "\r\033[K" >&2
+	echo -ne "\r\033[K" >&2
 }
 
 spinner() {
@@ -563,13 +562,13 @@ build_local() {
 		# The same logic as before, but inside a loop
 		target=$(readlink "$link")
 		if [[ ! -e "$link" ]]; then
-		new_target="/$target"
-		if [[ -e "$new_target" ]]; then
-			ln -snf "$new_target" "$link"
-		else
-			# Using log function for consistency
-			log "Broken symlink detected: $link -> $target" "WARN"
-		fi
+			new_target="/lib64/$target"
+			if [[ -e "$new_target" ]]; then
+				ln -snf "$new_target" "$link"
+			else
+				# Using log function for consistency
+				log "Broken symlink detected: $link -> $target" "WARN"
+			fi
 		fi
 	done
 

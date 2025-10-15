@@ -1,28 +1,29 @@
-name: CI (CentOS 7.7.1908)
+name: CI & Release (CentOS 7.7.1908)
 
 on:
   push:
     branches: [ "**" ]
+    tags: [ 'v*.*.*' ] # Trigger workflow on tags like v1.0.0
   pull_request:
     branches: [ "**" ]
   workflow_dispatch: {}
 
 jobs:
-  pack-and-build:
-    name: Pack and Build All
+  pack-build-and-release: # Renamed the job to reflect all its responsibilities
+    name: Pack, Build and Potentially Release
     runs-on: ubuntu-latest
     container: centos:7.7.1908
     timeout-minutes: 360
 
-    # Add an environment variable for the entire job
-    # This ensures OMW_NO_SPINNER is set for all subsequent steps
     env:
       OMW_NO_SPINNER: 1
+      # Pass the GITHUB_TOKEN to the container environment for the release step
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
 
     steps:
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
-          # Step 1: Point to the CentOS 7 vault repositories as it's EOL.
+          # ... (This part remains exactly the same as before) ...
           cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
           [base]
           name=CentOS-$releasever - Base
@@ -45,47 +46,120 @@ jobs:
           yum clean all
           yum -y makecache
           yum -y groupinstall "Development Tools"
-          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3 rpm2cpio
+          # Add curl and jq for the release step
+          yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz bzip2 python3 rpm2cpio ncurses-devel curl jq
 
       - name: Manual Checkout
-        # The actions/checkout@v3+ uses Node.js 20, which is incompatible with CentOS 7's old GLIBC.
-        # We are replacing it with a manual git clone to avoid this dependency.
         run: |
           set -euxo pipefail
-          # No need to export OMW_NO_SPINNER here anymore, it's inherited from the job's env
-          # Clone the repository into the current workspace directory (.).
-          # This uses the GITHUB_TOKEN for authentication, which works for both public and private repositories.
           git clone "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" .
-
-          # Check out the specific commit that triggered the workflow.
-          # The ${{ github.sha }} context variable provides the correct commit SHA for both 'push' and 'pull_request' events.
           git checkout "${{ github.sha }}"
 
       - name: Pack offline bundle
+        id: pack
         shell: bash
         run: |
           source /etc/profile.d/modules.sh
           chmod +x ./omw
           ./omw --pack
-          ls -la $HOME
-          mv $HOME/omw-offline-bundle-*.tar.gz $HOME/omw-offline-bundle-test.tar.gz
+          
+          # Find the created bundle file and save its path for later steps
+          BUNDLE_PATH=$(find $HOME -name "omw-offline-bundle-*.tar.gz" | head -n 1)
+          if [ -z "$BUNDLE_PATH" ]; then
+            echo "Error: Offline bundle was not created."
+            exit 1
+          fi
+          # Save the path to a file that can be sourced by later steps
+          echo "BUNDLE_PATH=${BUNDLE_PATH}" > $HOME/bundle_info.env
+          # For the test step, move it to a known location
+          mv "${BUNDLE_PATH}" $HOME/omw-offline-bundle-for-test.tar.gz
 
-      - name: Build everything from offline bundle
+      - name: Build everything from offline bundle (Test)
         shell: bash
         run: |
           source /etc/profile.d/modules.sh
-          # No need to export OMW_NO_SPINNER here anymore
-          # Move the bundle to the parent directory to simulate a real offline scenario
           cd $HOME
-          # Clean the original source directory
           rm -rf oh-my-workspace
-          # Extract and build
-          if [ ! -f "$HOME/omw-offline-bundle-test.tar.gz" ]; then
-            echo "Error: Offline bundle file not found!"
+          if [ ! -f "$HOME/omw-offline-bundle-for-test.tar.gz" ]; then
+            echo "Error: Offline bundle file for testing not found!"
             exit 1
           fi
           mkdir oh-my-workspace
           cd oh-my-workspace
-          tar -xzf $HOME/omw-offline-bundle-test.tar.gz
+          tar -xzf $HOME/omw-offline-bundle-for-test.tar.gz
           chmod +x ./omw
           ./omw --all
+
+      - name: Create and Upload Release Asset
+        # This step will only run if the workflow was triggered by a tag push
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          set -euxo pipefail
+          
+          # --- 1. Get information ---
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          RELEASE_NAME="OMW Release ${TAG_NAME}"
+          BUNDLE_FILE_PATH="$HOME/omw-offline-bundle-for-test.tar.gz"
+          ASSET_NAME="omw-offline-bundle-${TAG_NAME}.tar.gz"
+          
+          echo "Tag Name: ${TAG_NAME}"
+          echo "Release Name: ${RELEASE_NAME}"
+          echo "Bundle to upload: ${BUNDLE_FILE_PATH}"
+          echo "Asset Name: ${ASSET_NAME}"
+          
+          # --- 2. Create Release Body ---
+          REPO_URL="https://github.com/${{ github.repository }}"
+          RELEASE_BODY=$(cat <<EOF
+          ## OMW (Oh My Workspace) Release ${TAG_NAME} 🚀
+
+          This is an automated release containing the self-contained offline bundle for easy deployment.
+
+          ### Assets
+          - \`${ASSET_NAME}\`: The complete offline package.
+
+          ### How to Use
+          1. Download the \`.tar.gz\` asset from this release.
+          2. Transfer it to your offline CentOS 7 machine.
+          3. Extract the archive: \`tar -xzf ${ASSET_NAME}\`
+          4. Navigate into the extracted directory.
+          5. Run the installer: \`./omw --all\`
+
+          For more details, see the [project repository](${REPO_URL}).
+          EOF
+          )
+
+          # --- 3. Create the Release via GitHub API ---
+          # Use jq to properly format the JSON payload
+          JSON_PAYLOAD=$(jq -n \
+            --arg tag_name "$TAG_NAME" \
+            --arg name "$RELEASE_NAME" \
+            --arg body "$RELEASE_BODY" \
+            '{tag_name: $tag_name, name: $name, body: $body, draft: false, prerelease: false}')
+
+          echo "Creating Release..."
+          API_URL="https://api.github.com/repos/${{ github.repository }}/releases"
+          
+          # Send the request and capture the response
+          RESPONSE=$(curl -s -X POST -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github.v3+json" "${API_URL}" -d "${JSON_PAYLOAD}")
+          
+          # Extract the upload_url from the API response
+          UPLOAD_URL=$(echo "${RESPONSE}" | jq -r .upload_url | sed "s/{?name,label}//")
+          
+          if [ -z "$UPLOAD_URL" ] || [ "$UPLOAD_URL" == "null" ]; then
+            echo "Error creating release. API Response:"
+            echo "${RESPONSE}"
+            exit 1
+          fi
+          
+          echo "Release created successfully. Upload URL: ${UPLOAD_URL}"
+
+          # --- 4. Upload the asset to the release ---
+          echo "Uploading asset..."
+          curl -s -X POST \
+            -H "Authorization: token ${GITHUB_TOKEN}" \
+            -H "Content-Type: application/gzip" \
+            --data-binary "@${BUNDLE_FILE_PATH}" \
+            "${UPLOAD_URL}?name=${ASSET_NAME}"
+            
+          echo "Asset uploaded successfully!"
