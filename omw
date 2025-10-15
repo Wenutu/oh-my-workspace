@@ -467,7 +467,7 @@ build_software() {
 	fi
 	rm -rf "$build_dir"
 
-	# Recursively build dependencies
+	local dep
 	for dep in $deps; do
 		build_software "$dep"
 		module load "$dep/$dep-${SOFTWARE_VERSIONS[$dep]}"
