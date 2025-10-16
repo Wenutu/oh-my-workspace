@@ -75,7 +75,7 @@ log() {
 }
 
 start_spinner() {
-    [[ "$OMW_NO_SPINNER" == "1" ]] && return 0
+	[[ "$OMW_NO_SPINNER" == "1" ]] && return 0
 	spinner &
 	spinner_pid=$!
 }
@@ -112,6 +112,15 @@ check_sys_deps() {
 	if ((missing_deps)); then exit 1; fi
 	log "System dependencies are satisfied." "SUCCESS"
 	return 0
+}
+
+# NEW: Helper function to get the URL for a specific software version
+_get_software_url() {
+	local appname="$1"
+	local version="$2"
+	local url_template="${SOFTWARE_URLS[$appname]}"
+	# Replace the {VERSION} placeholder with the actual version number
+	echo "${url_template//\{VERSION\}/$version}"
 }
 
 download_package() {
@@ -186,34 +195,38 @@ _get_gcc_prereq_pkgs() {
 	done
 }
 
-# Prefetch GCC prerequisites to ensure offline availability
+# MODIFIED: Prefetch GCC prerequisites for all defined versions
 prefetch_gcc_prereqs() {
-	local version=${SOFTWARE_VERSIONS[gcc]}
-	local url=${SOFTWARE_URLS[gcc]}
-	[[ -z "$version" || -z "$url" ]] && return 0 # Skip if GCC is not defined
+	local versions_str="${SOFTWARE_VERSIONS[gcc]}"
+	[[ -z "$versions_str" ]] && return 0 # Skip if GCC is not defined
 
-	log "Prefetching GCC prerequisites..." "INFO"
-	local gcc_pkg="$PACKAGES_PATH/software/$(basename "$url")"
-	local tmp_dir="$BUILDS_PATH/.prefetch-gcc-$version"
+	log "Prefetching GCC prerequisites for all defined versions..." "INFO"
 
-	# Ensure GCC main package is downloaded
-	download_package "$url" "$gcc_pkg"
+	for version in $versions_str; do
+		local url
+		url=$(_get_software_url "gcc" "$version")
+		local gcc_pkg="$PACKAGES_PATH/software/$(basename "$url")"
+		local tmp_dir="$BUILDS_PATH/.prefetch-gcc-$version"
 
-	# Extract just to parse the prerequisites script
-	rm -rf "$tmp_dir"
-	mkdir -p "$tmp_dir"
-	extract_package "$gcc_pkg" "$tmp_dir" 1
+		# Ensure GCC main package is downloaded
+		download_package "$url" "$gcc_pkg"
 
-	local prereq_pkgs
-	mapfile -t prereq_pkgs < <(_get_gcc_prereq_pkgs "$tmp_dir")
+		# Extract just to parse the prerequisites script
+		rm -rf "$tmp_dir"
+		mkdir -p "$tmp_dir"
+		extract_package "$gcc_pkg" "$tmp_dir" 1
 
-	for pkg in "${prereq_pkgs[@]}"; do
-		local dest="$PACKAGES_PATH/software/$pkg"
-		download_package "${GCC_PREREQ_BASE_URL}${pkg}" "$dest"
+		local prereq_pkgs
+		mapfile -t prereq_pkgs < <(_get_gcc_prereq_pkgs "$tmp_dir")
+
+		for pkg in "${prereq_pkgs[@]}"; do
+			local dest="$PACKAGES_PATH/software/$pkg"
+			download_package "${GCC_PREREQ_BASE_URL}${pkg}" "$dest"
+		done
+
+		rm -rf "$tmp_dir"
 	done
-
-	rm -rf "$tmp_dir"
-	log "GCC prerequisites prefetched." "SUCCESS"
+	log "All GCC prerequisites prefetched." "SUCCESS"
 }
 
 # Generate SHA256 checksums for all packages
@@ -229,18 +242,24 @@ write_checksums() {
 	fi
 }
 
-# Verify offline completeness of all required assets
+# MODIFIED: Verify offline completeness for all defined software versions
 verify_offline() {
 	log "--- Verifying offline completeness ---" "INFO"
 	local missing=()
 
 	# 1) Source and precompiled packages
 	for sw in "${SOFTWARE_LIST[@]}"; do
-		local url="${SOFTWARE_URLS[$sw]}"
-		[[ -z "$url" ]] && continue
-		local p="$PACKAGES_PATH/software/$(basename "$url")"
-		[[ -f "$p" ]] || missing+=("$p")
+		local versions_str="${SOFTWARE_VERSIONS[$sw]}"
+		[[ -z "$versions_str" ]] && continue
+		for version in $versions_str; do
+			local url
+			url=$(_get_software_url "$sw" "$version")
+			[[ -z "$url" ]] && continue
+			local p="$PACKAGES_PATH/software/$(basename "$url")"
+			[[ -f "$p" ]] || missing+=("$p")
+		done
 	done
+
 	for app in "${APP_LIST[@]}"; do
 		local url="${APP_URLS[$app]}"
 		[[ -z "$url" ]] && continue
@@ -248,25 +267,30 @@ verify_offline() {
 		[[ -f "$p" ]] || missing+=("$p")
 	done
 
-	# 2) GCC prerequisites (if GCC is defined in config)
-	local gcc_url="${SOFTWARE_URLS[gcc]}"
-	if [[ -n "$gcc_url" ]]; then
-		local gcc_pkg="$PACKAGES_PATH/software/$(basename "$gcc_url")"
-		if [[ -f "$gcc_pkg" ]]; then
-			local tmp_dir="$BUILDS_PATH/.verify-gcc-prereqs"
-			rm -rf "$tmp_dir"
-			mkdir -p "$tmp_dir"
-			extract_package "$gcc_pkg" "$tmp_dir" 1
-			local prereq_pkgs
-			mapfile -t prereq_pkgs < <(_get_gcc_prereq_pkgs "$tmp_dir")
-			rm -rf "$tmp_dir"
-			for pkg in "${prereq_pkgs[@]}"; do
-				local p="$PACKAGES_PATH/software/$pkg"
-				[[ -f "$p" ]] || missing+=("$p")
-			done
-		else
-			missing+=("$gcc_pkg")
-		fi
+	# 2) GCC prerequisites (if GCC is defined in config) for all versions
+	local gcc_versions_str="${SOFTWARE_VERSIONS[gcc]}"
+	if [[ -n "$gcc_versions_str" ]]; then
+		for version in $gcc_versions_str; do
+			local gcc_url
+			gcc_url=$(_get_software_url "gcc" "$version")
+			local gcc_pkg="$PACKAGES_PATH/software/$(basename "$gcc_url")"
+
+			if [[ -f "$gcc_pkg" ]]; then
+				local tmp_dir="$BUILDS_PATH/.verify-gcc-prereqs-$version"
+				rm -rf "$tmp_dir"
+				mkdir -p "$tmp_dir"
+				extract_package "$gcc_pkg" "$tmp_dir" 1
+				local prereq_pkgs
+				mapfile -t prereq_pkgs < <(_get_gcc_prereq_pkgs "$tmp_dir")
+				rm -rf "$tmp_dir"
+				for pkg in "${prereq_pkgs[@]}"; do
+					local p="$PACKAGES_PATH/software/$pkg"
+					[[ -f "$p" ]] || missing+=("$p")
+				done
+			else
+				missing+=("$gcc_pkg")
+			fi
+		done
 	fi
 
 	# 3) Local RPM packages bundle
@@ -402,12 +426,21 @@ _build_gcc() {
 _build_vim() {
 	local build_dir="$1"
 	local prefix="$2"
+	local _ version # Get version from prefix
+	version=$(basename "$prefix")
+	version=${version#vim-}
+	# MODIFIED: Dynamically find the correct Lua version based on vim's dependency
+	local lua_dep
+	lua_dep=$(echo "${SOFTWARE_DEPS["vim@$version"]}" | grep -o 'lua@[^ ]*' | head -n 1)
+	local lua_name lua_version
+	lua_name=${lua_dep%@*}
+	lua_version=${lua_dep#*@}
 	local py_cfg
 	py_cfg=$(python3-config --configdir 2>/dev/null || echo "") # Fails gracefully
 	if [[ -z "$py_cfg" ]]; then
 		log "python3-config not found. Building vim without python3 support." "WARN"
 	fi
-	local config_cmd="./configure --prefix=$prefix --with-features=huge --enable-multibyte --enable-perlinterp --enable-luainterp=yes --with-lua-prefix=${SOFTWARE_INSTALL_PATH}/lua/lua-${SOFTWARE_VERSIONS[lua]} --enable-python3interp=yes --with-python3-config-dir=$py_cfg --enable-gui=gtk3 --with-tlib=ncursesw --enable-cscope --enable-fontset --with-compiledby=OMW"
+	local config_cmd="./configure --prefix=$prefix --with-features=huge --enable-multibyte --enable-perlinterp --enable-luainterp=yes --with-lua-prefix=${SOFTWARE_INSTALL_PATH}/${lua_name}/${lua_name}-${lua_version} --enable-python3interp=yes --with-python3-config-dir=$py_cfg --enable-gui=gtk3 --with-tlib=ncursesw --enable-cscope --enable-fontset --with-compiledby=OMW"
 	execute_build_steps "$build_dir" "$config_cmd" "$prefix"
 }
 
@@ -430,47 +463,63 @@ _build_default() {
 	execute_build_steps "$build_dir" "$config_cmd_template" "$prefix"
 }
 
-# Main dispatcher for building software
+# NEW: Helper function to parse 'name@version' string
+_parse_target() {
+	local target_str="$1"
+	local appname="${target_str%@*}"
+	local version="${target_str#*@}"
+	# If no version is specified, it's just the appname
+	if [[ "$appname" == "$version" ]]; then
+		version=""
+	fi
+	# Return as a string to be read by the caller
+	echo "$appname $version"
+}
+
+# REFACTORED: Main dispatcher for building software, now handles versioning
 build_software() {
-	local appname="$1"
+	local target_str="$1" # e.g., "python@3.11.12" or "local"
 	local force="${2:-false}"
 	local refresh="${3:-false}"
 
-	local version=${SOFTWARE_VERSIONS[$appname]}
-	local url=${SOFTWARE_URLS[$appname]}
-	local deps=${SOFTWARE_DEPS[$appname]}
-	local prefix="$SOFTWARE_INSTALL_PATH/$appname/$appname-$version"
-	local pkg_path="$PACKAGES_PATH/software/$(basename "$url")"
-	local build_dir="$BUILDS_PATH/$appname-$version"
+	local appname version
+	read -r appname version < <(_parse_target "$target_str")
 
-	# Special handling for 'local' target
+	# Special handling for 'local' target which has no version
 	if [[ "$appname" == "local" ]]; then
-		build_local "$force" "$refresh"
+		# local version uses the key from the config file.
+		build_local "$force" "$refresh" "${SOFTWARE_VERSIONS[local]}"
 		return 0
 	fi
 
 	log "--- Building $appname $version ---" "INFO"
 
 	if [[ "$refresh" == "true" ]]; then
-		log "Refreshing modulefile for $appname." "INFO"
+		log "Refreshing modulefile for $appname@$version." "INFO"
 		write_modulefile "$appname" "$version"
-		log "$appname modulefile refreshed." "SUCCESS"
+		log "$appname@$version modulefile refreshed." "SUCCESS"
 		return 0
 	fi
 
+	# Dependency resolution now respects specific versions
+	local deps="${SOFTWARE_DEPS["$appname@$version"]}"
 	if [[ -n "$deps" ]]; then
-		log "Processing dependencies for $appname: $deps" "DEBUG"
-		local dep # Ensure 'dep' is local to this function's scope
-		for dep in $deps; do
-			build_software "$dep"
-			log "Loading module for dependency: $dep" "INFO"
-			module load "$dep/$dep-${SOFTWARE_VERSIONS[$dep]}"
+		log "Processing dependencies for $appname@$version: $deps" "DEBUG"
+		local dep_target # e.g., "python@3.11.12"
+		for dep_target in $deps; do
+			local dep_name dep_version
+			read -r dep_name dep_version < <(_parse_target "$dep_target")
+			# Recursively call build_software with the versioned dependency
+			build_software "$dep_target"
+			log "Loading module for dependency: $dep_name/$dep_name-${dep_version}" "INFO"
+			module load "$dep_name/$dep_name-${dep_version}"
 		done
 	fi
 
-	if [[ -d "$prefix" && "$force" == "false" ]]; then
+	local prefix="$SOFTWARE_INSTALL_PATH/$appname/$appname-$version"
+	if [[ -d "$prefix" && "$force" == "false" ]]; a
 		write_modulefile "$appname" "$version"
-		log "$appname already installed. Skipping." "INFO"
+		log "$appname@$version already installed. Skipping." "INFO"
 		return 0
 	fi
 
@@ -479,12 +528,18 @@ build_software() {
 		log "Force build: backing up existing installation to $backup_dir" "WARN"
 		mv "$prefix" "$backup_dir"
 	fi
+
+	local build_dir="$BUILDS_PATH/$appname-$version"
 	rm -rf "$build_dir"
 
+	local url
+	url=$(_get_software_url "$appname" "$version")
 	if [[ -z "$url" ]]; then
-		log "No URL defined for $appname in configuration. Cannot proceed." "ERROR"
+		log "No URL template defined for $appname in configuration. Cannot proceed." "ERROR"
 		return 1
 	fi
+
+	local pkg_path="$PACKAGES_PATH/software/$(basename "$url")"
 	download_package "$url" "$pkg_path"
 	extract_package "$pkg_path" "$build_dir"
 
@@ -499,13 +554,13 @@ build_software() {
 	fi || return 1 # Exit if build function fails
 
 	write_modulefile "$appname" "$version"
-	log "$appname build process completed." "SUCCESS"
+	log "$appname@$version build process completed." "SUCCESS"
 }
 
 build_local() {
 	local force="${1:-false}"
 	local refresh="${2:-false}"
-	local version=${SOFTWARE_VERSIONS[local]}
+	local version="${3}" # Version is now passed in
 	local prefix="$SOFTWARE_INSTALL_PATH/local/local-$version"
 	local rpm_dir="$BUILDS_PATH/local-rpms"
 	local pkg_path="$PACKAGES_PATH/rpms.tar.gz"
@@ -576,10 +631,10 @@ build_local() {
 	# find "$prefix" -name "*.pc" -exec sed -i "s|-I/usr|-I$prefix/usr|g" {} +
 	# find "$prefix" -name "*.pc" -exec sed -i "s|-L/usr|-L$prefix/usr|g" {} +
 	find "$prefix" -name "*.pc" -exec sed -i \
-    -e "s|=/usr|=$prefix/usr|g" \
-    -e "s|-I/usr|-I$prefix/usr|g" \
-    -e "s|-L/usr|-L$prefix/usr|g" \
-    {} +
+		-e "s|=/usr|=$prefix/usr|g" \
+		-e "s|-I/usr|-I$prefix/usr|g" \
+		-e "s|-L/usr|-L$prefix/usr|g" \
+		{} +
 
 	write_modulefile "local" "$version"
 	local modulefile_path="$MODULEFILES_PATH/local/local-$version"
@@ -591,12 +646,12 @@ build_local() {
 	EOF
 }
 
-# Generates a modulefile for a given software package
+# MODIFIED: Generates a modulefile with version-specific dependencies
 write_modulefile() {
 	local appname="$1"
 	local version="$2"
 	local modulefile_path="$MODULEFILES_PATH/$appname/$appname-$version"
-	log "Generating modulefile for $appname" "INFO"
+	log "Generating modulefile for $appname@$version" "INFO"
 	mkdir -p "$(dirname "$modulefile_path")"
 	cat >"$modulefile_path" <<-EOF
 		#%Module1.0
@@ -631,18 +686,24 @@ write_modulefile() {
 			}
 		EOF
 	fi
-	# Add dependencies
-	local deps="${SOFTWARE_DEPS[$appname]:-}"
+	# Add dependencies with specific versions
+	local deps="${SOFTWARE_DEPS["$appname@$version"]:-}"
 	if [[ -n "$deps" ]]; then
 		echo "" >>"$modulefile_path"
-		for dep in $deps; do echo "module load $dep/$dep-${SOFTWARE_VERSIONS[$dep]}" >>"$modulefile_path"; done
+		local dep_target
+		for dep_target in $deps; do
+			local dep_name dep_version
+			read -r dep_name dep_version < <(_parse_target "$dep_target")
+			echo "module load $dep_name/$dep_name-${dep_version}" >>"$modulefile_path"
+		done
 	fi
 }
 
 _install_autojump() {
 	local appname="$1"
 	local install_dir="$2"
-	local exec_path=$(find "$install_dir" -type f -name "install.py" | head -n 1)
+	local exec_path
+	exec_path=$(find "$install_dir" -type f -name "install.py" | head -n 1)
 	[[ -z "$exec_path" ]] && {
 		log "autojump install.py not found in $install_dir." "ERROR"
 		return 1
@@ -653,7 +714,8 @@ _install_autojump() {
 	fi
 	rm -rf "$HOME/.autojump"
 	# Run the install script
-	local dirname=$(dirname "$exec_path")
+	local dirname
+	dirname=$(dirname "$exec_path")
 	log "Running autojump installer in $dirname" "INFO"
 	pushd "$dirname" >/dev/null
 	"./install.py" >/dev/null
@@ -694,9 +756,9 @@ _install_default() {
 install_app() {
 	local appname="$1"
 	local force="${2:-false}"
-	local version=${APP_VERSIONS[$appname]}
-	local url=${APP_URLS[$appname]}
-	local exec_name=${APP_EXECUTABLE_NAME[$appname]}
+	local version="${APP_VERSIONS[$appname]}"
+	local url="${APP_URLS[$appname]}"
+	local exec_name="${APP_EXECUTABLE_NAME[$appname]}"
 	local install_dir="$APPS_INSTALL_PATH/$appname-$version"
 	local pkg_path="$PACKAGES_PATH/apps/$(basename "$url")"
 	local symlink_path="$SCRIPTS_BIN_PATH/$exec_name"
@@ -785,17 +847,26 @@ configure() {
 	log "$target configuration complete." "SUCCESS"
 }
 
+# MODIFIED: Creates offline bundle by downloading all defined versions of all software
 create_offline_bundle() {
 	log "--- Creating OMW Offline Bundle ---" "INFO"
 	# 1. Download all required assets
 	log "Step 1: Downloading all software and app packages..."
-	for app in "${SOFTWARE_LIST[@]}"; do [[ -n "${SOFTWARE_URLS[$app]}" ]] && download_package "${SOFTWARE_URLS[$app]}" "$PACKAGES_PATH/software/$(basename "${SOFTWARE_URLS[$app]}")"; done
+	for app in "${SOFTWARE_LIST[@]}"; do
+		local versions_str="${SOFTWARE_VERSIONS[$app]}"
+		[[ -z "$versions_str" ]] && continue
+		for version in $versions_str; do
+			local url
+			url=$(_get_software_url "$app" "$version")
+			[[ -n "$url" ]] && download_package "$url" "$PACKAGES_PATH/software/$(basename "$url")"
+		done
+	done
 	for app in "${APP_LIST[@]}"; do download_package "${APP_URLS[$app]}" "$PACKAGES_PATH/apps/$(basename "${APP_URLS[$app]}")"; done
 
 	prefetch_gcc_prereqs
 
 	log "Step 2: Preparing local dependencies (RPMs)..."
-	build_local # This will download RPMs if rpms.tar.gz doesn't exist
+	build_local "false" "false" "${SOFTWARE_VERSIONS[local]}" # Run build_local for its download side-effect
 	if [[ -d "$BUILDS_PATH/local-rpms" ]] && [[ ! -f "$PACKAGES_PATH/rpms.tar.gz" ]]; then
 		tar -czf "$PACKAGES_PATH/rpms.tar.gz" -C "$BUILDS_PATH/local-rpms" .
 	fi
@@ -880,25 +951,40 @@ main() {
 	# Command execution
 	case "$command" in
 	-a | --all)
-        # Loop through all software, but skip 'gcc' as it's a large, optional component.
-        # It can be built explicitly with '--build gcc'.
-		for sw in "${SOFTWARE_LIST[@]}"; do 
-            if [[ "$sw" == "gcc" ]]; then
-                log "Skipping optional software 'gcc' in --all build. Build it explicitly with '--build gcc'." "INFO"
-                continue
-            fi
-            build_software "$sw" "$force" "$refresh"
-        done
+		# Loop through all software and all their defined versions
+		for sw in "${SOFTWARE_LIST[@]}"; do
+			local versions_str="${SOFTWARE_VERSIONS[$sw]}"
+			[[ -z "$versions_str" ]] && continue
+			for version in $versions_str; do
+				build_software "$sw@$version" "$force" "$refresh"
+			done
+		done
 		for app in "${APP_LIST[@]}"; do install_app "$app" "$force"; done
 		configure "tmux"
 		configure "zsh"
 		;;
 	-b | --build)
 		[[ -z "$target" ]] && {
-			log "Build command requires a software target." "ERROR"
+			log "Build command requires a software target, e.g., 'vim' or 'python@3.9.18'." "ERROR"
 			exit 1
 		}
-		build_software "$target" "$force" "$refresh"
+		local appname version
+		read -r appname version < <(_parse_target "$target")
+		# If no version is specified, build all available versions for that app
+		if [[ -z "$version" ]]; then
+			log "No version specified for '$appname'. Building all defined versions." "INFO"
+			local versions_str="${SOFTWARE_VERSIONS[$appname]}"
+			if [[ -z "$versions_str" ]]; then
+				log "No versions defined for '$appname' in software.conf." "ERROR"
+				exit 1
+			fi
+			for v in $versions_str; do
+				build_software "$appname@$v" "$force" "$refresh"
+			done
+		else
+			# Build the specific version requested
+			build_software "$target" "$force" "$refresh"
+		fi
 		;;
 	-i | --install)
 		[[ -z "$target" ]] && {
@@ -948,13 +1034,14 @@ main() {
 			OMW - A self-contained development environment manager.
 
 			Commands:
-			  -a, --all               Install all software (except optional ones like gcc), apps, and apply configurations.
-			  -b, --build <software>  Build specific software from source (e.g., vim, gcc).
+			  -a, --all               Install all defined versions of all software, all apps, and apply configurations.
+			  -b, --build <target>    Build specific software. Target can be 'name' (builds all versions)
+			                          or 'name@version' (builds a specific version).
 			  -i, --install <app>     Install a specific pre-compiled app (e.g., eza).
 			  --install-all-apps      Install all pre-compiled apps.
 			  -c, --config <target>   Configure a specific tool ('tmux' or 'zsh').
 			  --clean <target>        Clean directories. Targets: builds, packages, installs, apps, all.
-			  -p, --pack              Create a comprehensive offline deployment bundle.
+			  -p, --pack              Create a comprehensive offline deployment bundle with all versions.
 			  --verify-offline        Verify all assets are present for a fully offline build.
 			  -h, --help              Show this help message.
 
@@ -963,11 +1050,11 @@ main() {
 			  --refresh               Only refresh the modulefile for a built software.
 
 			Examples:
-			  # Build vim from source, forcing a rebuild if it exists
-			  $0 --build vim --force
+			  # Build all defined versions of vim
+			  $0 --build vim
 
-              # Build the optional gcc compiler
-              $0 --build gcc
+			  # Build a specific version of python, forcing a rebuild
+			  $0 --build python@3.9.18 --force
 
 			  # Install the eza command-line tool
 			  $0 --install eza
