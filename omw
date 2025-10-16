@@ -114,7 +114,7 @@ check_sys_deps() {
 	return 0
 }
 
-# NEW: Helper function to get the URL for a specific software version
+# Helper function to get the URL for a specific software version
 _get_software_url() {
 	local appname="$1"
 	local version="$2"
@@ -157,11 +157,11 @@ extract_package() {
 	log "Extracting $(basename "$pkg") to $(basename "$dest")" "INFO"
 	mkdir -p "$dest"
 	case "$pkg" in
-	*.tar.gz | *.tgz) tar -xzf "$pkg" -C "$dest" --strip-components="$strip" ;;
-	*.tar.xz) tar -xJf "$pkg" -C "$dest" --strip-components="$strip" ;;
-	*.tar.bz2) tar -xjf "$pkg" -C "$dest" --strip-components="$strip" ;;
-	*.zip) unzip -q "$pkg" -d "$dest" ;;
-	*)
+		*.tar.gz | *.tgz) tar -xzf "$pkg" -C "$dest" --strip-components="$strip" ;;
+		*.tar.xz) tar -xJf "$pkg" -C "$dest" --strip-components="$strip" ;;
+		*.tar.bz2) tar -xjf "$pkg" -C "$dest" --strip-components="$strip" ;;
+		*.zip) unzip -q "$pkg" -d "$dest" ;;
+		*)
 		log "Unsupported format: $pkg" "ERROR"
 		return 1
 		;;
@@ -195,7 +195,7 @@ _get_gcc_prereq_pkgs() {
 	done
 }
 
-# MODIFIED: Prefetch GCC prerequisites for all defined versions
+# Prefetch GCC prerequisites for all defined versions
 prefetch_gcc_prereqs() {
 	local versions_str="${SOFTWARE_VERSIONS[gcc]}"
 	[[ -z "$versions_str" ]] && return 0 # Skip if GCC is not defined
@@ -242,7 +242,7 @@ write_checksums() {
 	fi
 }
 
-# MODIFIED: Verify offline completeness for all defined software versions
+# Verify offline completeness for all defined software versions
 verify_offline() {
 	log "--- Verifying offline completeness ---" "INFO"
 	local missing=()
@@ -364,7 +364,6 @@ execute_build_steps() {
 }
 
 # --- Dedicated Build Functions for Each Software ---
-
 _build_ncurses() {
 	local build_dir="$1"
 	local prefix="$2"
@@ -429,7 +428,7 @@ _build_vim() {
 	local _ version # Get version from prefix
 	version=$(basename "$prefix")
 	version=${version#vim-}
-	# MODIFIED: Dynamically find the correct Lua version based on vim's dependency
+	# Dynamically find the correct Lua version based on vim's dependency
 	local lua_dep
 	lua_dep=$(echo "${SOFTWARE_DEPS["vim@$version"]}" | grep -o 'lua@[^ ]*' | head -n 1)
 	local lua_name lua_version
@@ -463,7 +462,7 @@ _build_default() {
 	execute_build_steps "$build_dir" "$config_cmd_template" "$prefix"
 }
 
-# NEW: Helper function to parse 'name@version' string
+# Helper function to parse 'name@version' string
 _parse_target() {
 	local target_str="$1"
 	local appname="${target_str%@*}"
@@ -476,7 +475,7 @@ _parse_target() {
 	echo "$appname $version"
 }
 
-# REFACTORED: Main dispatcher for building software, now handles versioning
+# Main dispatcher for building software, now handles versioning
 build_software() {
 	local target_str="$1" # e.g., "python@3.11.12" or "local"
 	local force="${2:-false}"
@@ -646,7 +645,7 @@ build_local() {
 	EOF
 }
 
-# MODIFIED: Generates a modulefile with version-specific dependencies
+# Generates a modulefile with version-specific dependencies
 write_modulefile() {
 	local appname="$1"
 	local version="$2"
@@ -847,7 +846,7 @@ configure() {
 	log "$target configuration complete." "SUCCESS"
 }
 
-# MODIFIED: Creates offline bundle by downloading all defined versions of all software
+# Creates offline bundle by downloading all defined versions of all software
 create_offline_bundle() {
 	log "--- Creating OMW Offline Bundle ---" "INFO"
 	# 1. Download all required assets
@@ -960,6 +959,8 @@ main() {
                 	log "Skipping optional software 'gcc' in --all build. Build it explicitly with '--build gcc'." "INFO"
                 	continue
             	fi
+				# Ensure a clean environment for each build
+				module purge
 				build_software "$sw@$version" "$force" "$refresh"
 			done
 		done
