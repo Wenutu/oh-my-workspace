@@ -956,6 +956,10 @@ main() {
 			local versions_str="${SOFTWARE_VERSIONS[$sw]}"
 			[[ -z "$versions_str" ]] && continue
 			for version in $versions_str; do
+			    if [[ "$sw" == "gcc" ]]; then
+                	log "Skipping optional software 'gcc' in --all build. Build it explicitly with '--build gcc'." "INFO"
+                	continue
+            	fi
 				build_software "$sw@$version" "$force" "$refresh"
 			done
 		done
