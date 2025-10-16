@@ -517,7 +517,7 @@ build_software() {
 	fi
 
 	local prefix="$SOFTWARE_INSTALL_PATH/$appname/$appname-$version"
-	if [[ -d "$prefix" && "$force" == "false" ]]; a
+	if [[ -d "$prefix" && "$force" == "false" ]]; then
 		write_modulefile "$appname" "$version"
 		log "$appname@$version already installed. Skipping." "INFO"
 		return 0
