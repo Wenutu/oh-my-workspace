@@ -103,7 +103,7 @@ jobs:
           
           # --- 1. Get information ---
           TAG_NAME="${GITHUB_REF#refs/tags/}"
-          RELEASE_NAME="OMW Release ${TAG_NAME}"
+          RELEASE_NAME="${TAG_NAME}"
           BUNDLE_FILE_PATH="$HOME/omw-offline-bundle-for-test.tar.gz"
           ASSET_NAME="omw-offline-bundle-${TAG_NAME}.tar.gz"
           
