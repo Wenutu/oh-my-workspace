@@ -15,6 +15,9 @@ jobs:
     container: centos:7.7.1908
     timeout-minutes: 360
 
+    permissions:
+      contents: write # Grant write permissions to the GITHUB_TOKEN
+
     env:
       OMW_NO_SPINNER: 1
       # Pass the GITHUB_TOKEN to the container environment for the release step
