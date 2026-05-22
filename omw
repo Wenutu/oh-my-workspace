@@ -1480,7 +1480,15 @@ _install_autojump() {
 	dirname=$(dirname "$exec_path")
 	log "Running autojump installer in $dirname" "INFO"
 	pushd "$dirname" >/dev/null
-	if ! "./install.py" >/dev/null; then
+	local installer_shell="${SHELL:-/bin/bash}"
+	case "$(basename "$installer_shell")" in
+	bash | zsh | fish | tcsh) ;;
+	*)
+		log "Unsupported or empty SHELL for autojump installer: ${SHELL:-unset}; using /bin/bash." "WARN"
+		installer_shell="/bin/bash"
+		;;
+	esac
+	if ! SHELL="$installer_shell" "./install.py" >/dev/null; then
 		popd >/dev/null
 		log "autojump installation failed." "ERROR"
 		safe_rm_rf "$HOME/.autojump"
