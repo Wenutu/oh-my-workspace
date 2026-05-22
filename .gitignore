@@ -1,5 +1,9 @@
 *.tar.gz
 packages/
+builds/
+apps/
+backups/
+bin/
 config/
 tools/
 scripts/

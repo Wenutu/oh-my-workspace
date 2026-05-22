@@ -42,6 +42,11 @@ Commands:
   - ./omw --pack
 - Verify offline completeness
   - ./omw --verify-offline
+- View installed and installable items
+  - ./omw --status
+  - ./omw --installed
+- Check for newer upstream versions
+  - ./omw --check-updates
 - Clean artifacts
   - ./omw --clean <builds|packages|installs|apps|all>
 - Help
@@ -56,8 +61,14 @@ Examples:
 # Force rebuild vim
 ./omw --build vim --force
 
-# Install the eza CLI
-./omw --install eza
+# See installed and installable software/apps
+./omw --status
+
+# Check for newer configured versions
+./omw --check-updates
+
+# Install the exa CLI
+./omw --install exa
 
 # Create a portable offline bundle
 ./omw --pack
@@ -66,7 +77,7 @@ Examples:
 ## Software and Apps
 Software and apps are defined in `software.conf` via arrays such as:
 - SOFTWARE_LIST, SOFTWARE_VERSIONS, SOFTWARE_URLS, SOFTWARE_DEPS, SOFTWARE_CONFIG_CMDS, SOFTWARE_CFLAGS, SOFTWARE_LDFLAGS
-- APP_LIST, APP_VERSIONS, APP_URLS, APP_EXECUTABLE_NAME
+- APP_LIST, APP_VERSIONS, APP_URLS, APP_EXECUTABLE_NAME, APP_SOURCE_URLS
 
 You can add or override entries in `software.conf` to customize builds and app sources.
 
@@ -104,8 +115,8 @@ To re-verify completeness offline:
 ```
 
 ## Configuration Targets
-- tmux: Clones `gpakosz/.tmux`, symlinks `.tmux.conf`, and preserves local overrides.
-- zsh: Clones Oh My Zsh + common plugins/themes, ensures OMW env sourcing, and creates a `~/.zshrc_custom` hook.
+- tmux: Clones `gpakosz/.tmux`, backs up existing config under `backups/tmux/`, symlinks `.tmux.conf`, and preserves local overrides.
+- zsh: Clones Oh My Zsh + common plugins/themes, backs up existing config under `backups/zsh/`, keeps an existing `~/.oh-my-zsh` unchanged, ensures OMW env sourcing, and creates a `~/.zshrc_custom` hook.
 
 ```bash
 ./omw --config tmux
@@ -120,6 +131,8 @@ To re-verify completeness offline:
 - tools/modulefiles/     Generated modulefiles
 - apps/                  Installed app payloads
 - bin/                   Symlinks for installed apps
+
+Apps can optionally define `APP_SOURCE_URLS`; those source archives are downloaded and verified for offline bundles.
 
 ## Troubleshooting
 - Missing dependencies: Run `./omw` on a machine with the listed system tools or install them first.

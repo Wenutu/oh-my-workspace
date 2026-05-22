@@ -26,7 +26,6 @@ jobs:
     steps:
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
-          # ... (This part remains exactly the same as before) ...
           cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
           [base]
           name=CentOS-$releasever - Base
@@ -66,7 +65,7 @@ jobs:
           source /etc/profile.d/modules.sh
           chmod +x ./omw
           ./omw --pack
-          
+
           # Find the created bundle file and save its path for later steps
           BUNDLE_PATH=$(find $HOME -name "omw-offline-bundle-*.tar.gz" | head -n 1)
           if [ -z "$BUNDLE_PATH" ]; then
@@ -100,18 +99,18 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          
+
           # --- 1. Get information ---
           TAG_NAME="${GITHUB_REF#refs/tags/}"
           RELEASE_NAME="${TAG_NAME}"
           BUNDLE_FILE_PATH="$HOME/omw-offline-bundle-for-test.tar.gz"
           ASSET_NAME="omw-offline-bundle-${TAG_NAME}.tar.gz"
-          
+
           echo "Tag Name: ${TAG_NAME}"
           echo "Release Name: ${RELEASE_NAME}"
           echo "Bundle to upload: ${BUNDLE_FILE_PATH}"
           echo "Asset Name: ${ASSET_NAME}"
-          
+
           # --- 2. Create Release Body ---
           REPO_URL="https://github.com/${{ github.repository }}"
           RELEASE_BODY=$(cat <<EOF
@@ -143,19 +142,19 @@ jobs:
 
           echo "Creating Release..."
           API_URL="https://api.github.com/repos/${{ github.repository }}/releases"
-          
+
           # Send the request and capture the response
           RESPONSE=$(curl -s -X POST -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github.v3+json" "${API_URL}" -d "${JSON_PAYLOAD}")
-          
+
           # Extract the upload_url from the API response
           UPLOAD_URL=$(echo "${RESPONSE}" | jq -r .upload_url | sed "s/{?name,label}//")
-          
+
           if [ -z "$UPLOAD_URL" ] || [ "$UPLOAD_URL" == "null" ]; then
             echo "Error creating release. API Response:"
             echo "${RESPONSE}"
             exit 1
           fi
-          
+
           echo "Release created successfully. Upload URL: ${UPLOAD_URL}"
 
           # --- 4. Upload the asset to the release ---
@@ -165,5 +164,5 @@ jobs:
             -H "Content-Type: application/gzip" \
             --data-binary "@${BUNDLE_FILE_PATH}" \
             "${UPLOAD_URL}?name=${ASSET_NAME}"
-            
+
           echo "Asset uploaded successfully!"

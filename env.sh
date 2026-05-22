@@ -3,7 +3,7 @@
 # Source it in your ~/.bashrc or ~/.zshrc: source /path/to/your/omw/env.sh
 
 export OMW_HOME
-OMW_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+OMW_HOME=$(builtin cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 # Add the main OMW script directory to the PATH
 if [[ ":$PATH:" != *":$OMW_HOME:"* ]]; then

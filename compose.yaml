@@ -1,0 +1,52 @@
+services:
+  centos7-x86:
+    image: centos:7
+    platform: linux/amd64
+    working_dir: /workspace
+    environment:
+      BASH_ENV: /etc/profile.d/modules.sh
+      OMW_NO_SPINNER: "1"
+    volumes:
+      - .:/workspace
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        set -euo pipefail
+
+        sed -i \
+          -e 's|^mirrorlist=|#mirrorlist=|g' \
+          -e 's|^#baseurl=http://mirror.centos.org/centos/$$releasever|baseurl=http://vault.centos.org/7.9.2009|g' \
+          /etc/yum.repos.d/CentOS-Base.repo
+
+        rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 || true
+
+        yum install -y --setopt=tsflags=nodocs \
+          cpio \
+          environment-modules \
+          findutils \
+          git \
+          make \
+          rpm-build \
+          tar \
+          unzip \
+          wget \
+          which \
+          yum-utils \
+          gcc
+
+        yum clean all
+
+        # BASH_ENV makes future docker compose exec Bash commands load module;
+        # source it here because this shell started before the package existed.
+        source /etc/profile.d/modules.sh
+
+        bash -n omw
+        bash -n software.conf
+        bash -n env.sh
+        type module
+        ./omw --help >/dev/null
+
+        echo "OMW CentOS 7 x86 test container is ready."
+        echo "Try: docker compose exec centos7-x86 ./omw --verify-offline"
+        tail -f /dev/null
