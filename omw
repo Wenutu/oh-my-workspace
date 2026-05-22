@@ -686,6 +686,7 @@ clone_repo_once() {
 	local url="$1"
 	local dest="$2"
 	local backup_dest=""
+	local clone_log=""
 	if [[ -d "$dest/.git" ]]; then
 		log "Repository exists: $dest" "INFO"
 		return 0
@@ -701,16 +702,71 @@ clone_repo_once() {
 	fi
 	local tmp_dest="${dest}.tmp-$$"
 	safe_rm_rf "$tmp_dest"
-	if ! git clone --depth 1 "$url" "$tmp_dest"; then
+	clone_log=$(mktemp)
+	if ! GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$tmp_dest" 2>"$clone_log"; then
+		log "Git clone failed for $url. Last output:" "WARN"
+		cat "$clone_log" >&2
 		safe_rm_rf "$tmp_dest"
+		rm -f "$clone_log"
+		if fetch_github_repo_snapshot "$url" "$dest"; then
+			[[ -n "$backup_dest" ]] && log "Previous non-git destination was kept at $backup_dest." "WARN"
+			return 0
+		fi
 		if [[ -n "$backup_dest" && -e "$backup_dest" && ! -e "$dest" ]]; then
-			log "Restoring previous non-git destination after clone failure: $dest" "WARN"
+			log "Restoring previous non-git destination after fetch failure: $dest" "WARN"
 			mv "$backup_dest" "$dest"
 		fi
 		return 1
 	fi
+	rm -f "$clone_log"
 	mv "$tmp_dest" "$dest"
 	[[ -n "$backup_dest" ]] && log "Previous non-git destination was kept at $backup_dest." "WARN"
+	return 0
+}
+
+github_archive_url() {
+	local url="$1"
+	local owner repo
+
+	if [[ "$url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
+		owner="${BASH_REMATCH[1]}"
+		repo="${BASH_REMATCH[2]%.git}"
+		printf 'https://github.com/%s/%s/archive/HEAD.tar.gz' "$owner" "$repo"
+	fi
+}
+
+github_archive_cache_path() {
+	local url="$1"
+	local owner repo safe_repo
+
+	if [[ "$url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
+		owner="${BASH_REMATCH[1]}"
+		repo="${BASH_REMATCH[2]%.git}"
+		safe_repo="${repo//[^A-Za-z0-9._-]/_}"
+		printf '%s/config/%s-%s-HEAD.tar.gz' "$PACKAGES_PATH" "$owner" "$safe_repo"
+	fi
+}
+
+fetch_github_repo_snapshot() {
+	local url="$1"
+	local dest="$2"
+	local archive_url archive_path
+
+	archive_url=$(github_archive_url "$url")
+	archive_path=$(github_archive_cache_path "$url")
+	if [[ -z "$archive_url" || -z "$archive_path" ]]; then
+		log "No archive fallback is available for $url." "ERROR"
+		return 1
+	fi
+
+	log "Falling back to GitHub archive snapshot for $url" "WARN"
+	if ! download_package "$archive_url" "$archive_path"; then
+		return 1
+	fi
+	if ! extract_package "$archive_path" "$dest" 1; then
+		return 1
+	fi
+	log "Repository snapshot prepared: $dest" "SUCCESS"
 }
 
 ensure_module_command() {
