@@ -690,9 +690,13 @@ clone_repo_once() {
 		log "Repository exists: $dest" "INFO"
 		return 0
 	fi
+	if [[ -d "$dest" ]] && find "$dest" -mindepth 1 -print -quit | grep -q .; then
+		log "Using existing non-git directory as an offline copy: $dest" "WARN"
+		return 0
+	fi
 	if [[ -e "$dest" ]]; then
 		backup_dest="${dest}.backup-$(date +%Y%m%d%H%M%S)"
-		log "Destination exists but is not a git repo: $dest; moving it to $backup_dest." "WARN"
+		log "Destination exists but is not a usable git repo copy: $dest; moving it to $backup_dest." "WARN"
 		mv "$dest" "$backup_dest"
 	fi
 	local tmp_dest="${dest}.tmp-$$"
