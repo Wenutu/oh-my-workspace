@@ -685,21 +685,28 @@ print_status() {
 clone_repo_once() {
 	local url="$1"
 	local dest="$2"
+	local backup_dest=""
 	if [[ -d "$dest/.git" ]]; then
 		log "Repository exists: $dest" "INFO"
 		return 0
 	fi
 	if [[ -e "$dest" ]]; then
-		log "Destination exists but is not a git repo: $dest" "ERROR"
-		return 1
+		backup_dest="${dest}.backup-$(date +%Y%m%d%H%M%S)"
+		log "Destination exists but is not a git repo: $dest; moving it to $backup_dest." "WARN"
+		mv "$dest" "$backup_dest"
 	fi
 	local tmp_dest="${dest}.tmp-$$"
 	safe_rm_rf "$tmp_dest"
 	if ! git clone --depth 1 "$url" "$tmp_dest"; then
 		safe_rm_rf "$tmp_dest"
+		if [[ -n "$backup_dest" && -e "$backup_dest" && ! -e "$dest" ]]; then
+			log "Restoring previous non-git destination after clone failure: $dest" "WARN"
+			mv "$backup_dest" "$dest"
+		fi
 		return 1
 	fi
 	mv "$tmp_dest" "$dest"
+	[[ -n "$backup_dest" ]] && log "Previous non-git destination was kept at $backup_dest." "WARN"
 }
 
 ensure_module_command() {
