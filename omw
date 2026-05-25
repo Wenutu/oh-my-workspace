@@ -1136,11 +1136,12 @@ package_config() {
 	package_path=$(config_package_path "$target")
 	ensure_valid_cwd
 
+	if [[ -f "$package_path" ]]; then
+		log "Using existing config package for $target: $package_path" "INFO"
+		return 0
+	fi
+
 	if ! config_ready_for_package "$target"; then
-		if [[ -f "$package_path" ]]; then
-			log "Config source for $target is missing; keeping existing package: $package_path" "INFO"
-			return 0
-		fi
 		if [[ "$target" == "vim" ]]; then
 			log "Vim config source and package are missing; skipping optional Vim config package." "WARN"
 			return 0

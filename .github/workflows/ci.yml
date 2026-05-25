@@ -63,6 +63,7 @@ jobs:
         shell: bash
         run: |
           source /etc/profile.d/modules.sh
+          ls -lh packages/config/*.tar.gz
           chmod +x ./omw
           ./omw --pack
 
@@ -87,9 +88,8 @@ jobs:
             echo "Error: Offline bundle file for testing not found!"
             exit 1
           fi
-          mkdir oh-my-workspace
-          cd oh-my-workspace
           tar -xzf $HOME/omw-offline-bundle-for-test.tar.gz
+          cd oh-my-workspace
           chmod +x ./omw
           ./omw --all
 
