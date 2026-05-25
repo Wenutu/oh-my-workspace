@@ -27,7 +27,7 @@ pack-vim:
 		exit 1; \
 	fi; \
 	mkdir -p "$(OUT_DIR)"; \
-	tar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
+	COPYFILE_DISABLE=1 tar --format=ustar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
 	printf 'Packed config/%s -> %s\n' "$$cfg" "$(OUT_DIR)/$$cfg.tar.gz"
 
 pack-tmux:
@@ -39,7 +39,7 @@ pack-tmux:
 		exit 1; \
 	fi; \
 	mkdir -p "$(OUT_DIR)"; \
-	tar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
+	COPYFILE_DISABLE=1 tar --format=ustar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
 	printf 'Packed config/%s -> %s\n' "$$cfg" "$(OUT_DIR)/$$cfg.tar.gz"
 
 pack-zsh:
@@ -51,7 +51,7 @@ pack-zsh:
 		exit 1; \
 	fi; \
 	mkdir -p "$(OUT_DIR)"; \
-	tar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
+	COPYFILE_DISABLE=1 tar --format=ustar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
 	printf 'Packed config/%s -> %s\n' "$$cfg" "$(OUT_DIR)/$$cfg.tar.gz"
 
 pack-configs:

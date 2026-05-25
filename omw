@@ -169,16 +169,18 @@ clear_directory_contents() {
 backup_path_once() {
 	local path="$1"
 	local reason="${2:-config}"
-	local backup_dir="$OMW_HOME/backups/$reason/$(date +%Y%m%d%H%M%S)"
-	local backup_path
+	local backup_dir backup_path stamp suffix=0
+
+	stamp=$(date +%Y%m%d%H%M%S)
+	backup_dir="$OMW_HOME/backups/$reason/$stamp"
+	while [[ -e "$backup_dir/$(basename "$path")" || -L "$backup_dir/$(basename "$path")" ]]; do
+		((++suffix))
+		backup_dir="$OMW_HOME/backups/$reason/$stamp-$suffix"
+	done
 
 	[[ -e "$path" || -L "$path" ]] || return 0
 	mkdir -p "$backup_dir"
 	backup_path="$backup_dir/$(basename "$path")"
-	[[ -e "$backup_path" || -L "$backup_path" ]] && {
-		printf '%s\n' "$backup_path"
-		return 0
-	}
 	cp -a "$path" "$backup_path"
 	log "Backed up $path to $backup_path" "INFO"
 	printf '%s\n' "$backup_path"
@@ -1135,12 +1137,24 @@ package_config() {
 	ensure_valid_cwd
 
 	if ! config_ready_for_package "$target"; then
-		log "Config for $target is missing or empty; skipping package: $required_path" "WARN"
-		return 0
+		if [[ -f "$package_path" ]]; then
+			log "Config source for $target is missing; keeping existing package: $package_path" "INFO"
+			return 0
+		fi
+		if [[ "$target" == "vim" ]]; then
+			log "Vim config source and package are missing; skipping optional Vim config package." "WARN"
+			return 0
+		fi
+		log "Config for $target is missing or empty; running configuration flow before packaging: $required_path" "WARN"
+		configure "$target" || return 1
+		if ! config_ready_for_package "$target"; then
+			log "Configuration flow did not prepare expected files: $required_path" "ERROR"
+			return 1
+		fi
 	fi
 
 	mkdir -p "$(dirname "$package_path")"
-	if ! tar --exclude=".git" -czf "$package_path" -C "$CONFIG_PATH" "$target"; then
+	if ! COPYFILE_DISABLE=1 tar --format=ustar --exclude=".git" -czf "$package_path" -C "$CONFIG_PATH" "$target"; then
 		log "Failed to create config package: $package_path" "ERROR"
 		return 1
 	fi
@@ -1176,7 +1190,7 @@ restore_config_package() {
 		log "Failed to restore $target config package." "ERROR"
 		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
 			safe_rm_rf "$target_dir"
-			mv "$backup_dir" "$target_dir"
+			cp -a "$backup_dir" "$target_dir"
 			log "Restored previous $target config from $backup_dir" "WARN"
 		fi
 		return 1
@@ -1185,7 +1199,7 @@ restore_config_package() {
 		log "Config package did not restore expected directory: $required_path" "ERROR"
 		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
 			safe_rm_rf "$target_dir"
-			mv "$backup_dir" "$target_dir"
+			cp -a "$backup_dir" "$target_dir"
 			log "Restored previous $target config from $backup_dir" "WARN"
 		fi
 		return 1
