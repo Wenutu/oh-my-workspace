@@ -100,7 +100,7 @@ module load local/local-<version>
 ```bash
 ./omw --pack
 ```
-This downloads all sources/apps, GCC prerequisites, local RPMs, and config repos; verifies integrity; then creates `~/omw-offline-bundle-YYYYMMDD.tar.gz`.
+This downloads all sources/apps, GCC prerequisites, local RPMs, prepares missing config repos, verifies integrity, and then creates `~/omw-offline-bundle-YYYYMMDD.tar.gz`.
 
 2) On an offline machine:
 ```bash
@@ -116,6 +116,7 @@ To re-verify completeness offline:
 
 ## Configuration Targets
 - tmux: Clones `gpakosz/.tmux`, backs up existing config under `backups/tmux/`, symlinks `.tmux.conf`, and preserves local overrides.
+- vim: Clones `Wenutu/vimrc` into `config/vim/vim9`, runs its installer (`.install` or `install.sh`), and installs an OMW-managed `~/.vimrc`.
 - zsh: Clones Oh My Zsh + common plugins/themes, backs up existing config under `backups/zsh/`, keeps an existing `~/.oh-my-zsh` unchanged, ensures OMW env sourcing, and creates a `~/.zshrc_custom` hook.
 
 ```bash

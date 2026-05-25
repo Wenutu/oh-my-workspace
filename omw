@@ -22,6 +22,7 @@ trap 'stop_spinner' EXIT
 ###############################################################################
 init_globals() {
 	OMW_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+	cd "$OMW_HOME"
 	# Source environment variables if they exist
 	# shellcheck disable=SC1091
 	[[ -f "$OMW_HOME/env.sh" ]] && source "$OMW_HOME/env.sh"
@@ -138,8 +139,16 @@ file_size() {
 	fi
 }
 
+ensure_valid_cwd() {
+	if ! pwd -P >/dev/null 2>&1; then
+		log "Current directory is no longer accessible; switching to $OMW_HOME" "WARN"
+		cd "$OMW_HOME"
+	fi
+}
+
 safe_rm_rf() {
 	local path="$1"
+	ensure_valid_cwd
 	if [[ -z "$path" || "$path" == "/" ]]; then
 		log "Refusing to remove unsafe path: '${path}'" "ERROR"
 		return 1
@@ -1083,11 +1092,60 @@ config_package_path() {
 	printf '%s/config/%s.tar.gz' "$PACKAGES_PATH" "$target"
 }
 
+config_required_path() {
+	local target="$1"
+
+	case "$target" in
+	tmux)
+		printf '%s/tmux/.tmux' "$CONFIG_PATH"
+		;;
+	vim)
+		printf '%s/vim/vim9' "$CONFIG_PATH"
+		;;
+	zsh)
+		printf '%s/zsh/.oh-my-zsh' "$CONFIG_PATH"
+		;;
+	*)
+		printf '%s/%s' "$CONFIG_PATH" "$target"
+		;;
+	esac
+}
+
+config_ready_for_package() {
+	local target="$1"
+	local required_path first_entry
+	required_path=$(config_required_path "$target")
+
+	[[ -d "$required_path" ]] || return 1
+	first_entry=$(find "$required_path" -mindepth 1 -print -quit)
+	[[ -n "$first_entry" ]]
+}
+
+ensure_config_for_package() {
+	local target="$1"
+	local required_path
+	required_path=$(config_required_path "$target")
+
+	if config_ready_for_package "$target"; then
+		log "Config already prepared for $target: $required_path" "INFO"
+		return 0
+	fi
+
+	log "Config for $target is missing or empty; running configuration flow." "WARN"
+	configure "$target" || return 1
+
+	if ! config_ready_for_package "$target"; then
+		log "Configuration flow did not prepare expected files: $required_path" "ERROR"
+		return 1
+	fi
+}
+
 package_config() {
 	local target="$1"
 	local source_dir="$CONFIG_PATH/$target"
 	local package_path
 	package_path=$(config_package_path "$target")
+	ensure_valid_cwd
 
 	if [[ ! -d "$source_dir" ]]; then
 		log "Config directory not found: $source_dir" "ERROR"
@@ -1105,6 +1163,7 @@ package_config() {
 package_all_configs() {
 	local cfg
 	for cfg in tmux vim zsh; do
+		ensure_config_for_package "$cfg" || return 1
 		package_config "$cfg" || return 1
 	done
 }
@@ -1977,8 +2036,9 @@ write_omw_vimrc() {
 		    let &runtimepath = substitute(&runtimepath, '\V' . escape(s:old_dir, '\'), '\=s:new_dir', 'g')
 		    let &packpath = substitute(&packpath, '\V' . escape(s:old_dir, '\'), '\=s:new_dir', 'g')
 
-		    if filereadable(expand('/workspace/config/vim/vim9/vimrc'))
-		        source /workspace/config/vim/vim9/vimrc
+		    let s:vimrc = s:new_dir . '/vimrc'
+		    if filereadable(s:vimrc)
+		        execute 'source ' . fnameescape(s:vimrc)
 		    endif
 		else
 		    if filereadable(expand('~/.vim/vimrc'))
@@ -1998,6 +2058,49 @@ write_omw_vimrc() {
 	[[ -e "$vimrc" || -L "$vimrc" ]] && backup_path_for_config "$vimrc" "vim"
 	mv "$tmp_vimrc" "$vimrc"
 	log "Installed OMW vimrc to $vimrc" "SUCCESS"
+}
+
+run_vim_config_install() {
+	local cfg_dir="$1"
+	local installer=""
+	local install_sh="$cfg_dir/install.sh"
+	local vim_version="${SOFTWARE_VERSIONS[vim]%% *}"
+	local vim_module="vim/vim-${vim_version}"
+
+	if [[ -f "$cfg_dir/.install" ]]; then
+		installer=".install"
+	elif [[ -f "$install_sh" ]]; then
+		# shellcheck disable=SC2016
+		if grep -Fq "git checkout release" "$install_sh" && ! grep -Fq 'cd "${repo_dir}"' "$install_sh"; then
+			local tmp_install_sh
+			tmp_install_sh=$(mktemp)
+			log "Patching Vim installer to return to repo root after coc.nvim checkout." "INFO"
+			awk '
+				{ print }
+				$0 ~ /^[[:space:]]*git checkout release[[:space:]]*$/ {
+					print "\tcd \"${repo_dir}\""
+				}
+			' "$install_sh" >"$tmp_install_sh"
+			mv "$tmp_install_sh" "$install_sh"
+			chmod +x "$install_sh"
+		fi
+		installer="install.sh"
+	else
+		log "Vim installer not found in $cfg_dir (.install or install.sh)" "ERROR"
+		return 1
+	fi
+
+	ensure_module_command || return 1
+	ensure_valid_cwd
+	log "Running Vim config installer: $cfg_dir/$installer" "INFO"
+	(
+		cd "$cfg_dir"
+		if ! module load "$vim_module"; then
+			module load vim
+		fi
+		bash "./$installer"
+		vim -es -u ~/.vimrc -i NONE -c 'CocInstall -sync coc-snippets coc-json coc-pyright coc-perl coc-yaml|q'
+	)
 }
 
 ###############################################################################
@@ -2021,10 +2124,9 @@ configure() {
 		log "Configuring Vim..."
 		local cfg_dir="$CONFIG_PATH/vim/vim9"
 		restore_config_package "$target" "$cfg_dir" || return 1
-		if [[ ! -d "$cfg_dir" ]]; then
-			log "Vim config directory not found: $cfg_dir" "ERROR"
-			return 1
-		fi
+		mkdir -p "$CONFIG_PATH/vim"
+		clone_repo_once "https://github.com/Wenutu/vimrc.git" "$cfg_dir" || return 1
+		run_vim_config_install "$cfg_dir" || return 1
 		write_omw_vimrc || return 1
 		;;
 	"zsh")
@@ -2082,6 +2184,7 @@ init_shell_env() {
 # Creates offline bundle by downloading all defined versions of all software
 create_offline_bundle() {
 	log "--- Creating OMW Offline Bundle ---" "INFO"
+	ensure_valid_cwd
 	# 1. Download all required assets
 	log "Step 1: Downloading all software and app packages..."
 	for app in "${SOFTWARE_LIST[@]}"; do
@@ -2124,6 +2227,7 @@ create_offline_bundle() {
 	if ! package_all_configs; then
 		return 1
 	fi
+	ensure_valid_cwd
 
 	# 3.1 Generate checksums for all packages
 	if ! write_checksums; then
