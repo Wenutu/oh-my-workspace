@@ -100,7 +100,7 @@ module load local/local-<version>
 ```bash
 ./omw --pack
 ```
-This downloads all sources/apps, GCC prerequisites, local RPMs, prepares missing config repos, verifies integrity, and then creates `~/omw-offline-bundle-YYYYMMDD.tar.gz`.
+This downloads all sources/apps, GCC prerequisites, local RPMs, packages existing config directories, verifies integrity, and then creates `~/omw-offline-bundle-YYYYMMDD.tar.gz`.
 
 2) On an offline machine:
 ```bash
@@ -115,13 +115,19 @@ To re-verify completeness offline:
 ```
 
 ## Configuration Targets
-- tmux: Clones `gpakosz/.tmux`, backs up existing config under `backups/tmux/`, symlinks `.tmux.conf`, and preserves local overrides.
-- vim: Clones `Wenutu/vimrc` into `config/vim/vim9`, runs its installer (`.install` or `install.sh`), and installs an OMW-managed `~/.vimrc`.
-- zsh: Clones Oh My Zsh + common plugins/themes, backs up existing config under `backups/zsh/`, keeps an existing `~/.oh-my-zsh` unchanged, ensures OMW env sourcing, and creates a `~/.zshrc_custom` hook.
+- tmux: Restores `packages/config/tmux.tar.gz` first; if missing, clones `gpakosz/.tmux`, backs up existing config under `backups/tmux/`, symlinks `.tmux.conf`, and preserves local overrides.
+- vim: Restores `packages/config/vim.tar.gz` when present and installs an OMW-managed `~/.vimrc`; if no Vim config package exists, Vim config is skipped.
+- zsh: Restores `packages/config/zsh.tar.gz` first; if missing, clones Oh My Zsh + common plugins/themes, backs up existing config under `backups/zsh/`, keeps an existing `~/.oh-my-zsh` unchanged, ensures OMW env sourcing, and creates a `~/.zshrc_custom` hook.
 
 ```bash
 ./omw --config tmux
 ./omw --config zsh
+```
+
+Before creating a bundle for upload, manually prepare your config directories and pack them:
+```bash
+make pack-vim OUT_DIR=packages/config
+make pack-configs OUT_DIR=packages/config
 ```
 
 ## Directory Layout

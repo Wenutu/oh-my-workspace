@@ -1069,10 +1069,15 @@ verify_offline() {
 	# 3) Local RPM packages bundle
 	verify_package "$PACKAGES_PATH/rpms.tar.gz"
 
-	# 4) Config packages
-	for cfg in tmux vim zsh; do
+	# 4) Config packages required for offline fallback-free shell setup
+	for cfg in tmux zsh; do
 		verify_package "$PACKAGES_PATH/config/$cfg.tar.gz"
 	done
+	if [[ ! -f "$PACKAGES_PATH/config/vim.tar.gz" ]]; then
+		log "Optional Vim config package not found; Vim config will be skipped offline." "WARN"
+	else
+		verify_package "$PACKAGES_PATH/config/vim.tar.gz"
+	fi
 
 	if ((${#missing[@]} > 0)); then
 		log "Missing offline assets:" "ERROR"
@@ -1121,35 +1126,17 @@ config_ready_for_package() {
 	[[ -n "$first_entry" ]]
 }
 
-ensure_config_for_package() {
-	local target="$1"
-	local required_path
-	required_path=$(config_required_path "$target")
-
-	if config_ready_for_package "$target"; then
-		log "Config already prepared for $target: $required_path" "INFO"
-		return 0
-	fi
-
-	log "Config for $target is missing or empty; running configuration flow." "WARN"
-	configure "$target" || return 1
-
-	if ! config_ready_for_package "$target"; then
-		log "Configuration flow did not prepare expected files: $required_path" "ERROR"
-		return 1
-	fi
-}
-
 package_config() {
 	local target="$1"
-	local source_dir="$CONFIG_PATH/$target"
+	local required_path
 	local package_path
+	required_path=$(config_required_path "$target")
 	package_path=$(config_package_path "$target")
 	ensure_valid_cwd
 
-	if [[ ! -d "$source_dir" ]]; then
-		log "Config directory not found: $source_dir" "ERROR"
-		return 1
+	if ! config_ready_for_package "$target"; then
+		log "Config for $target is missing or empty; skipping package: $required_path" "WARN"
+		return 0
 	fi
 
 	mkdir -p "$(dirname "$package_path")"
@@ -1163,7 +1150,6 @@ package_config() {
 package_all_configs() {
 	local cfg
 	for cfg in tmux vim zsh; do
-		ensure_config_for_package "$cfg" || return 1
 		package_config "$cfg" || return 1
 	done
 }
@@ -1171,22 +1157,37 @@ package_all_configs() {
 restore_config_package() {
 	local target="$1"
 	local required_path="$2"
-	local package_path
+	local package_path target_dir backup_dir
 	package_path=$(config_package_path "$target")
+	target_dir="$CONFIG_PATH/$target"
 
-	[[ -d "$required_path" ]] && return 0
 	if [[ ! -f "$package_path" ]]; then
 		return 0
 	fi
 
 	log "Restoring $target config from $package_path" "INFO"
 	mkdir -p "$CONFIG_PATH"
+	if [[ -e "$target_dir" || -L "$target_dir" ]]; then
+		backup_dir=$(backup_path_once "$target_dir" "$target")
+		safe_rm_rf "$target_dir"
+		[[ -n "$backup_dir" ]] && log "Existing $target config was replaced by package; backup: $backup_dir" "INFO"
+	fi
 	if ! tar -xzf "$package_path" -C "$CONFIG_PATH"; then
 		log "Failed to restore $target config package." "ERROR"
+		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
+			safe_rm_rf "$target_dir"
+			mv "$backup_dir" "$target_dir"
+			log "Restored previous $target config from $backup_dir" "WARN"
+		fi
 		return 1
 	fi
 	if [[ ! -d "$required_path" ]]; then
 		log "Config package did not restore expected directory: $required_path" "ERROR"
+		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
+			safe_rm_rf "$target_dir"
+			mv "$backup_dir" "$target_dir"
+			log "Restored previous $target config from $backup_dir" "WARN"
+		fi
 		return 1
 	fi
 }
@@ -2060,49 +2061,6 @@ write_omw_vimrc() {
 	log "Installed OMW vimrc to $vimrc" "SUCCESS"
 }
 
-run_vim_config_install() {
-	local cfg_dir="$1"
-	local installer=""
-	local install_sh="$cfg_dir/install.sh"
-	local vim_version="${SOFTWARE_VERSIONS[vim]%% *}"
-	local vim_module="vim/vim-${vim_version}"
-
-	if [[ -f "$cfg_dir/.install" ]]; then
-		installer=".install"
-	elif [[ -f "$install_sh" ]]; then
-		# shellcheck disable=SC2016
-		if grep -Fq "git checkout release" "$install_sh" && ! grep -Fq 'cd "${repo_dir}"' "$install_sh"; then
-			local tmp_install_sh
-			tmp_install_sh=$(mktemp)
-			log "Patching Vim installer to return to repo root after coc.nvim checkout." "INFO"
-			awk '
-				{ print }
-				$0 ~ /^[[:space:]]*git checkout release[[:space:]]*$/ {
-					print "\tcd \"${repo_dir}\""
-				}
-			' "$install_sh" >"$tmp_install_sh"
-			mv "$tmp_install_sh" "$install_sh"
-			chmod +x "$install_sh"
-		fi
-		installer="install.sh"
-	else
-		log "Vim installer not found in $cfg_dir (.install or install.sh)" "ERROR"
-		return 1
-	fi
-
-	ensure_module_command || return 1
-	ensure_valid_cwd
-	log "Running Vim config installer: $cfg_dir/$installer" "INFO"
-	(
-		cd "$cfg_dir"
-		if ! module load "$vim_module"; then
-			module load vim
-		fi
-		bash "./$installer"
-		vim -es -u ~/.vimrc -i NONE -c 'CocInstall -sync coc-snippets coc-json coc-pyright coc-perl coc-yaml|q'
-	)
-}
-
 ###############################################################################
 # Post-Install & Packaging
 ###############################################################################
@@ -2124,9 +2082,10 @@ configure() {
 		log "Configuring Vim..."
 		local cfg_dir="$CONFIG_PATH/vim/vim9"
 		restore_config_package "$target" "$cfg_dir" || return 1
-		mkdir -p "$CONFIG_PATH/vim"
-		clone_repo_once "https://github.com/Wenutu/vimrc.git" "$cfg_dir" || return 1
-		run_vim_config_install "$cfg_dir" || return 1
+		if ! config_ready_for_package "$target"; then
+			log "Vim config package not found and local Vim config is missing; skipping Vim config." "WARN"
+			return 0
+		fi
 		write_omw_vimrc || return 1
 		;;
 	"zsh")
