@@ -172,6 +172,13 @@ omw_verify_offline() {
 		verify_package "$PACKAGES_PATH/config/vim.tar.gz"
 	fi
 
+	if _omw_node_has_any_packages; then
+		verify_package "$PACKAGES_PATH/node/npm-cache.tar.gz"
+	fi
+	if ! omw_node_verify "temp"; then
+		missing+=("$PACKAGES_PATH/node/npm-cache.tar.gz (Node package offline verification failed)")
+	fi
+
 	if ((${#missing[@]} > 0)); then
 		omw_log "Missing offline assets:" "ERROR"
 		for m in "${missing[@]}"; do echo "  - $m" >&2; done
@@ -360,12 +367,18 @@ omw_create_offline_bundle() {
 	omw_ensure_valid_cwd
 
 	# 3.1 Generate checksums for all packages
+	omw_log "Step 4: Preparing Node package npm cache..."
+	if ! omw_node_pack; then
+		return 1
+	fi
+	omw_ensure_valid_cwd
+
 	if ! _omw_offline_write_checksums; then
 		return 1
 	fi
 
 	# 3.2 Verify offline completeness before packing
-	omw_log "Step 4: Verifying offline completeness..."
+	omw_log "Step 5: Verifying offline completeness..."
 	if ! omw_verify_offline; then
 		omw_log "Offline verification failed. Please fix missing items before packing." "ERROR"
 		return 1
@@ -374,7 +387,7 @@ omw_create_offline_bundle() {
 	# 4. Create the final archive
 	local archive_name
 	archive_name="omw-offline-bundle-$(date +%Y%m%d).tar.gz"
-	omw_log "Step 5: Creating final archive: $archive_name"
+	omw_log "Step 6: Creating final archive: $archive_name"
 	cd "$OMW_HOME"
 	local tmp_archive="$HOME/.${archive_name}.tmp"
 	local staging_dir="$BUILDS_PATH/.offline-bundle-$$"

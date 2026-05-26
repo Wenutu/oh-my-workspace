@@ -28,7 +28,7 @@ omw_init_globals() {
 
 	# Ensure core directories exist
 	readonly DIRECTORIES=(
-		"$CONFIG_PATH" "$PACKAGES_PATH/software" "$PACKAGES_PATH/apps"
+		"$CONFIG_PATH" "$PACKAGES_PATH/software" "$PACKAGES_PATH/apps" "$PACKAGES_PATH/node"
 		"$PACKAGES_PATH/config" "$BUILDS_PATH" "$SOFTWARE_INSTALL_PATH" "$MODULEFILES_PATH" "$APPS_INSTALL_PATH" "$SCRIPTS_BIN_PATH"
 	)
 	for dir in "${DIRECTORIES[@]}"; do
@@ -71,7 +71,7 @@ omw_init_globals() {
 
 _omw_common_validate_config() {
 	local errors=0
-	local name version versions_str deps dep dep_name dep_version app
+	local name version versions_str deps dep dep_name dep_version app alias package_name bin_name node_version
 	local placeholder="${OMW_NONE:--}"
 
 	for name in "${SOFTWARE_LIST[@]}"; do
@@ -154,6 +154,64 @@ _omw_common_validate_config() {
 			omw_log "APP_EXECUTABLE_NAME[$app] contains the empty-field placeholder." "ERROR"
 			((++errors))
 		}
+	done
+
+	validate_node_package_version() {
+		local label="$1"
+		local pkg_version="$2"
+		if [[ -z "$pkg_version" || "$pkg_version" == "$placeholder" || "$pkg_version" == "latest" || "$pkg_version" == *[\^\~\>\<\=\|\*]* || "$pkg_version" == x* || "$pkg_version" == X* || "$pkg_version" == *".x"* || "$pkg_version" == *".X"* || "$pkg_version" == *"x."* || "$pkg_version" == *"X."* ]]; then
+			omw_log "$label must be a fixed concrete version." "ERROR"
+			((++errors))
+		fi
+	}
+
+	validate_node_version_ref() {
+		local label="$1"
+		local ref_version="$2"
+		if [[ -z "$ref_version" || "$ref_version" == "$placeholder" ]]; then
+			omw_log "$label must be an OMW Node version." "ERROR"
+			((++errors))
+		elif ! omw_contains_word "$ref_version" "${SOFTWARE_VERSIONS[node]:-}"; then
+			omw_log "$label references undefined node version: $ref_version" "ERROR"
+			((++errors))
+		fi
+	}
+
+	for alias in "${NODE_PACKAGE_LIST[@]}"; do
+		if [[ "$alias" == "$placeholder" ]]; then
+			omw_log "NODE_PACKAGE_LIST contains the empty-field placeholder." "ERROR"
+			((++errors))
+		fi
+		package_name="${NODE_PACKAGE_NAMES[$alias]:-}"
+		version="${NODE_PACKAGE_VERSIONS[$alias]:-}"
+		bin_name="${NODE_PACKAGE_BINS[$alias]:-}"
+		node_version="${NODE_PACKAGE_NODE_VERSIONS[$alias]:-}"
+		if [[ -z "$package_name" || "$package_name" == "$placeholder" ]]; then
+			omw_log "NODE_PACKAGE_NAMES[$alias] must be a package name." "ERROR"
+			((++errors))
+		fi
+		validate_node_package_version "NODE_PACKAGE_VERSIONS[$alias]" "$version"
+		if [[ -n "$bin_name" && "$bin_name" == "$placeholder" ]]; then
+			omw_log "NODE_PACKAGE_BINS[$alias] still contains the empty-field placeholder." "ERROR"
+			((++errors))
+		fi
+		validate_node_version_ref "NODE_PACKAGE_NODE_VERSIONS[$alias]" "$node_version"
+	done
+
+	for alias in "${NODE_CACHE_PACKAGE_LIST[@]}"; do
+		if [[ "$alias" == "$placeholder" ]]; then
+			omw_log "NODE_CACHE_PACKAGE_LIST contains the empty-field placeholder." "ERROR"
+			((++errors))
+		fi
+		package_name="${NODE_CACHE_PACKAGE_NAMES[$alias]:-}"
+		version="${NODE_CACHE_PACKAGE_VERSIONS[$alias]:-}"
+		node_version="${NODE_CACHE_PACKAGE_NODE_VERSIONS[$alias]:-}"
+		if [[ -z "$package_name" || "$package_name" == "$placeholder" ]]; then
+			omw_log "NODE_CACHE_PACKAGE_NAMES[$alias] must be a package name." "ERROR"
+			((++errors))
+		fi
+		validate_node_package_version "NODE_CACHE_PACKAGE_VERSIONS[$alias]" "$version"
+		validate_node_version_ref "NODE_CACHE_PACKAGE_NODE_VERSIONS[$alias]" "$node_version"
 	done
 
 	if ((errors > 0)); then

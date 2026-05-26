@@ -231,6 +231,7 @@ _omw_status_ui_status() {
 	local status="$1"
 	case "$status" in
 	installed) _omw_status_ui_color "1;32" "installed" ;;
+	cached) _omw_status_ui_color "1;32" "cached" ;;
 	partial) _omw_status_ui_color "1;33" "partial" ;;
 	missing) _omw_status_ui_color "1;31" "missing" ;;
 	available) _omw_status_ui_color "1;36" "available" ;;
@@ -384,6 +385,43 @@ omw_print_status() {
 		printf '%-14s %-14s %-12s %-10s %s\n' "$name" "$version" "$(_omw_status_ui_status "$status")" "$pkg" "$cmd"
 	done
 
+	_omw_status_ui_section "Node packages"
+	printf '%-14s %-24s %-14s %-12s %-10s %s\n' "Alias" "Package" "Node" "State" "Cache" "Command"
+	for name in "${NODE_PACKAGE_LIST[@]}"; do
+		version="${NODE_PACKAGE_VERSIONS[$name]:-}"
+		url="${NODE_PACKAGE_NAMES[$name]:-}"
+		cmd="${NODE_PACKAGE_NODE_VERSIONS[$name]:-}"
+		if [[ -z "$version" || -z "$url" || -z "$cmd" ]]; then
+			printf '%-14s %-24s %-14s %-12s %-10s %s\n' "$name" "-" "-" "$(_omw_status_ui_status missing)" "-" "incomplete definition"
+			continue
+		fi
+		status=$(omw_node_package_status "$name")
+		[[ "$show_all" == "false" && "$status" != "installed" && "$status" != "partial" ]] && continue
+		if _omw_node_cache_ready || _omw_node_cache_archive_ready; then
+			pkg="cached"
+		else
+			pkg="needed"
+		fi
+		printf '%-14s %-24s %-14s %-12s %-10s %s\n' "$name" "$url@$version" "$cmd" "$(_omw_status_ui_status "$status")" "$pkg" "./omw node install $name"
+	done
+	for name in "${NODE_CACHE_PACKAGE_LIST[@]}"; do
+		version="${NODE_CACHE_PACKAGE_VERSIONS[$name]:-}"
+		url="${NODE_CACHE_PACKAGE_NAMES[$name]:-}"
+		cmd="${NODE_CACHE_PACKAGE_NODE_VERSIONS[$name]:-}"
+		if [[ -z "$version" || -z "$url" || -z "$cmd" ]]; then
+			printf '%-14s %-24s %-14s %-12s %-10s %s\n' "$name" "-" "-" "$(_omw_status_ui_status missing)" "-" "incomplete cache-only definition"
+			continue
+		fi
+		status=$(omw_node_cache_package_status "$name")
+		[[ "$show_all" == "false" && "$status" != "cached" ]] && continue
+		if _omw_node_cache_ready || _omw_node_cache_archive_ready; then
+			pkg="cached"
+		else
+			pkg="needed"
+		fi
+		printf '%-14s %-24s %-14s %-12s %-10s %s\n' "$name" "$url@$version" "$cmd" "$(_omw_status_ui_status "$status")" "$pkg" "./omw node restore-cache"
+	done
+
 	_omw_status_ui_section "Shell configs"
 	printf '%-14s %-14s %-12s %s\n' "Name" "Target" "State" "Command"
 	for name in tmux vim zsh; do
@@ -395,5 +433,6 @@ omw_print_status() {
 	printf '\nInstall commands: %s, %s, %s\n' \
 		"$(_omw_status_ui_color "36" "./omw --build <name[@version]>")" \
 		"$(_omw_status_ui_color "36" "./omw --install <app>")" \
-		"$(_omw_status_ui_color "36" "./omw --all")"
+		"$(_omw_status_ui_color "36" "./omw node install <alias>")"
+	printf 'Full setup: %s\n' "$(_omw_status_ui_color "36" "./omw --all")"
 }

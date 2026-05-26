@@ -7,8 +7,12 @@
 
 declare -p SOFTWARE_LIST >/dev/null 2>&1 || declare -a SOFTWARE_LIST
 declare -p APP_LIST >/dev/null 2>&1 || declare -a APP_LIST
+declare -p NODE_PACKAGE_LIST >/dev/null 2>&1 || declare -a NODE_PACKAGE_LIST
+declare -p NODE_CACHE_PACKAGE_LIST >/dev/null 2>&1 || declare -a NODE_CACHE_PACKAGE_LIST
 declare -p SOFTWARE_VERSIONS >/dev/null 2>&1 || declare -A SOFTWARE_VERSIONS SOFTWARE_URLS SOFTWARE_DEPS SOFTWARE_CONFIG_CMDS SOFTWARE_CFLAGS SOFTWARE_LDFLAGS
 declare -p APP_VERSIONS >/dev/null 2>&1 || declare -A APP_VERSIONS APP_URLS APP_EXECUTABLE_NAME APP_SOURCE_URLS APP_BIN_DIRS
+declare -p NODE_PACKAGE_NAMES >/dev/null 2>&1 || declare -A NODE_PACKAGE_NAMES NODE_PACKAGE_VERSIONS NODE_PACKAGE_BINS NODE_PACKAGE_NODE_VERSIONS
+declare -p NODE_CACHE_PACKAGE_NAMES >/dev/null 2>&1 || declare -A NODE_CACHE_PACKAGE_NAMES NODE_CACHE_PACKAGE_VERSIONS NODE_CACHE_PACKAGE_NODE_VERSIONS
 
 SOFTWARE_LIST=()
 SOFTWARE_VERSIONS=()
@@ -24,6 +28,17 @@ APP_URLS=()
 APP_EXECUTABLE_NAME=()
 APP_SOURCE_URLS=()
 APP_BIN_DIRS=()
+
+NODE_PACKAGE_LIST=()
+NODE_PACKAGE_NAMES=()
+NODE_PACKAGE_VERSIONS=()
+NODE_PACKAGE_BINS=()
+NODE_PACKAGE_NODE_VERSIONS=()
+
+NODE_CACHE_PACKAGE_LIST=()
+NODE_CACHE_PACKAGE_NAMES=()
+NODE_CACHE_PACKAGE_VERSIONS=()
+NODE_CACHE_PACKAGE_NODE_VERSIONS=()
 
 OMW_NONE="-"
 
@@ -110,6 +125,59 @@ app() {
 	return 0
 }
 
+node_package() {
+	if (($# != 5)); then
+		echo "ERROR: node_package requires 5 fields: alias package version bin node_version" >&2
+		return 1
+	fi
+
+	local alias="$1"
+	local package_name
+	local version
+	local bin_name
+	local node_version
+
+	package_name=$(_omw_packages_value "$2")
+	version=$(_omw_packages_value "$3")
+	bin_name=$(_omw_packages_value "$4")
+	node_version=$(_omw_packages_value "$5")
+
+	if ! _omw_packages_has_word "$alias" "${NODE_PACKAGE_LIST[*]:-}"; then
+		NODE_PACKAGE_LIST+=("$alias")
+	fi
+
+	NODE_PACKAGE_NAMES["$alias"]="$package_name"
+	NODE_PACKAGE_VERSIONS["$alias"]="$version"
+	NODE_PACKAGE_BINS["$alias"]="$bin_name"
+	NODE_PACKAGE_NODE_VERSIONS["$alias"]="$node_version"
+	return 0
+}
+
+node_cache_package() {
+	if (($# != 4)); then
+		echo "ERROR: node_cache_package requires 4 fields: alias package version node_version" >&2
+		return 1
+	fi
+
+	local alias="$1"
+	local package_name
+	local version
+	local node_version
+
+	package_name=$(_omw_packages_value "$2")
+	version=$(_omw_packages_value "$3")
+	node_version=$(_omw_packages_value "$4")
+
+	if ! _omw_packages_has_word "$alias" "${NODE_CACHE_PACKAGE_LIST[*]:-}"; then
+		NODE_CACHE_PACKAGE_LIST+=("$alias")
+	fi
+
+	NODE_CACHE_PACKAGE_NAMES["$alias"]="$package_name"
+	NODE_CACHE_PACKAGE_VERSIONS["$alias"]="$version"
+	NODE_CACHE_PACKAGE_NODE_VERSIONS["$alias"]="$node_version"
+	return 0
+}
+
 # software fields:
 #   1. name       Package name used by `omw build <name>`.
 #   2. version    One concrete version; repeat `software` for multiple versions.
@@ -128,6 +196,19 @@ app() {
 #   4. executable  Executable name to expose, or "special" for a dedicated installer.
 #   5. source_url  Optional source archive URL for offline bundles. Use "-" when not needed.
 #   6. bin_dirs    Optional space-separated bin directories to link wholesale. Use "-" when not needed.
+#
+# node_package fields:
+#   1. alias        Short name used by `omw node install <alias>`.
+#   2. package      npm package name, scoped names allowed.
+#   3. version      Fixed npm package version. Do not use latest or ranges.
+#   4. bin          Expected executable name, or "-" when no bin should be checked.
+#   5. node_version OMW Node version to load before npm operations.
+#
+# node_cache_package fields:
+#   1. alias        Short name shown in status and verify output.
+#   2. package      npm package name, scoped names allowed.
+#   3. version      Fixed npm package version. Do not use latest or ranges.
+#   4. node_version OMW Node version to load before npm cache operations.
 
 ###############################################################################
 # Source Builds
@@ -289,3 +370,19 @@ app "verible" \
 	"verible-verilog-ls" \
 	"-" \
 	"bin"
+
+###############################################################################
+# Node Global Packages
+###############################################################################
+
+# Pin concrete versions for reproducible offline npm cache packing.
+node_package "codex" "@openai/codex" "0.133.0" "codex" "22.22.3"
+node_package "claude-code" "@anthropic-ai/claude-code" "2.1.150" "claude" "22.22.3"
+
+###############################################################################
+# Node Cache-Only Packages
+###############################################################################
+
+# Cache-only packages are included in packages/node/npm-cache.tar.gz but are not
+# installed by `omw node install-all` or `omw all`.
+# node_cache_package "typescript" "typescript" "5.9.3" "22.22.3"
