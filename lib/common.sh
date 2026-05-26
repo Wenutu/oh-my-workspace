@@ -10,32 +10,6 @@ omw_log() {
 	echo -e "\033[1;${c[$level]:-36}m[${ts}] [${level}] - ${msg}\033[0m" >&2
 }
 
-omw_start_spinner() {
-	[[ "$OMW_NO_SPINNER" == "1" ]] && return 0
-	_omw_common_spinner &
-	spinner_pid=$!
-}
-
-omw_stop_spinner() {
-	if [[ -n "$spinner_pid" ]]; then
-		# Kill the _omw_common_spinner process and wait for it to terminate
-		kill -s TERM "$spinner_pid" 2>/dev/null
-		wait "$spinner_pid" 2>/dev/null
-		spinner_pid=""
-	fi
-	echo -ne "\r\033[K" >&2
-}
-
-_omw_common_spinner() {
-	trap 'exit 0' TERM
-	while :; do
-		for c in / - \\ \|; do
-			echo -ne "\r\033[1;36m[INFO] $(date +"%T") - Processing ${c}" >&2
-			sleep 0.1
-		done
-	done
-}
-
 omw_init_globals() {
 	OMW_HOME=$(cd "$OMW_HOME" && pwd)
 	cd "$OMW_HOME"

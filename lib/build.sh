@@ -37,15 +37,12 @@ _omw_build_execute_steps() {
 
 		omw_log "Step: $step... (omw_log: $log_file)" "INFO"
 		omw_log "Executing command: $cmd" "DEBUG"
-		omw_start_spinner
 		if ! bash -c "$cmd" &>"$log_file"; then
-			omw_stop_spinner
 			omw_log "Step '$step' failed. See details below." "ERROR"
 			tail -n 20 "$log_file" >&2
 			popd >/dev/null
 			return 1
 		fi
-		omw_stop_spinner
 		omw_log "Step '$step' completed." "SUCCESS"
 	done
 	popd >/dev/null
@@ -434,14 +431,25 @@ omw_build_local() {
 			"binutils" "bison" "flex" "gettext" "libtool" "patch"
 			"pkgconfig"
 		)
-		omw_start_spinner
-		if ! yumdownloader --downloadonly --destdir="$rpm_dir" --resolve --archlist=x86_64,noarch "${rpms_to_download[@]}" >/dev/null; then
-			omw_stop_spinner
+		local yum_log
+		yum_log="$BUILDS_PATH/local-rpms-yumdownloader.log"
+		: >"$yum_log"
+		omw_log "RPM download directory: $rpm_dir" "INFO"
+		omw_log "yumdownloader log: $yum_log" "INFO"
+		if ! yumdownloader --downloadonly --destdir="$rpm_dir" --resolve --archlist=x86_64,noarch "${rpms_to_download[@]}" >"$yum_log" 2>&1; then
 			omw_log "RPM dependency download failed." "ERROR"
+			omw_log "Command: yumdownloader --downloadonly --destdir=\"$rpm_dir\" --resolve --archlist=x86_64,noarch ${rpms_to_download[*]}" "ERROR"
+			omw_log "Requested RPM dependencies (${#rpms_to_download[@]}): ${rpms_to_download[*]}" "ERROR"
+			omw_log "Full yumdownloader log: $yum_log" "ERROR"
+			if command -v yum >/dev/null 2>&1; then
+				omw_log "Enabled yum repositories:" "ERROR"
+				yum repolist enabled 2>&1 | sed 's/^/  /' >&2 || true
+			fi
+			omw_log "Last 80 lines from yumdownloader:" "ERROR"
+			tail -n 80 "$yum_log" >&2 || true
 			[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
 			return 1
 		fi
-		omw_stop_spinner
 		find "$rpm_dir" -name "*.i686.rpm" -delete
 	else
 		omw_log "Using pre-packaged RPMs from $pkg_path" "INFO"
