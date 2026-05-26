@@ -2,6 +2,9 @@ SHELL := /bin/bash
 
 CONFIGS ?= vim tmux zsh
 OUT_DIR ?= packages/config
+PACK_SERVICE ?= centos7-x86
+TAR_FORMAT ?= gnu
+LINUX_TAR ?= tar
 
 .PHONY: help pack-vim pack-tmux pack-zsh pack-configs
 
@@ -17,6 +20,8 @@ help:
 	@printf '%s\n' 'Variables:'
 	@printf '%s\n' '  OUT_DIR=/path/to/output'
 	@printf '%s\n' '  CONFIGS="vim tmux zsh"'
+	@printf '%s\n' '  PACK_SERVICE=centos7-x86'
+	@printf '%s\n' '  LINUX_TAR="docker compose exec -T centos7-x86 tar --format=gnu"'
 
 pack-vim:
 	@set -eu; \
@@ -27,7 +32,7 @@ pack-vim:
 		exit 1; \
 	fi; \
 	mkdir -p "$(OUT_DIR)"; \
-	COPYFILE_DISABLE=1 tar --format=ustar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
+	$(LINUX_TAR) -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
 	printf 'Packed config/%s -> %s\n' "$$cfg" "$(OUT_DIR)/$$cfg.tar.gz"
 
 pack-tmux:
@@ -39,7 +44,7 @@ pack-tmux:
 		exit 1; \
 	fi; \
 	mkdir -p "$(OUT_DIR)"; \
-	COPYFILE_DISABLE=1 tar --format=ustar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
+	$(LINUX_TAR) -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
 	printf 'Packed config/%s -> %s\n' "$$cfg" "$(OUT_DIR)/$$cfg.tar.gz"
 
 pack-zsh:
@@ -51,7 +56,7 @@ pack-zsh:
 		exit 1; \
 	fi; \
 	mkdir -p "$(OUT_DIR)"; \
-	COPYFILE_DISABLE=1 tar --format=ustar --exclude='.git' -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
+	$(LINUX_TAR) -czf "$(OUT_DIR)/$$cfg.tar.gz" -C config "$$cfg"; \
 	printf 'Packed config/%s -> %s\n' "$$cfg" "$(OUT_DIR)/$$cfg.tar.gz"
 
 pack-configs:

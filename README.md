@@ -1,6 +1,6 @@
 # OMW (Oh My Workspace)
 
-A self-contained development environment manager for Linux. OMW builds common developer tools from source, installs prebuilt apps, wires environment modules automatically, and can produce a fully offline bundle for air-gapped machines.
+A self-contained Linux workspace manager organized around three core phases: build source tools, install prebuilt apps, and apply workspace configs. OMW also wires environment modules and can produce a fully offline bundle for air-gapped machines.
 
 ## Highlights
 - Source builds with dependency orchestration and modulefiles
@@ -22,35 +22,35 @@ Tip: On RHEL/CentOS-like systems, install `environment-modules` and `yum-utils`.
 # From the repo root
 chmod +x ./omw
 
-# Build all software, install all apps, and configure tmux/zsh
-./omw --all
+# Run build -> app -> config
+./omw all
 ```
 
 ## Usage
-OMW groups actions into build (from source), install (prebuilt apps), config, and packaging.
+OMW groups actions by functional area. Legacy flags such as `--build`, `--install`, and `--pack` are still supported, but the preferred form is:
 
 Commands:
-- Build software from source
-  - ./omw --build <software> [--force] [--refresh]
-- Install a prebuilt app
-  - ./omw --install <app> [--force]
-- Install all prebuilt apps
-  - ./omw --install-all-apps
-- Configure a tool (tmux | zsh)
-  - ./omw --config <target>
-- Create an offline bundle
-  - ./omw --pack
-- Verify offline completeness
-  - ./omw --verify-offline
-- View installed and installable items
-  - ./omw --status
-  - ./omw --installed
-- Check for newer upstream versions
-  - ./omw --check-updates
+- Build source software
+  - ./omw build <software[@version]> [--force] [--refresh]
+  - ./omw build all
+- Install prebuilt apps
+  - ./omw app install <app> [--force]
+  - ./omw app install-all
+- Configure shell/editor targets
+  - ./omw config <tmux|vim|zsh|all>
+  - ./omw init
+- Offline bundle operations
+  - ./omw offline pack
+  - ./omw offline verify
+- View status and updates
+  - ./omw status
+  - ./omw status installed
+  - ./omw update check
 - Clean artifacts
-  - ./omw --clean <builds|packages|installs|apps|all>
-- Help
-  - ./omw --help
+  - ./omw clean <builds|packages|installs|apps|all>
+  - `packages` and `all` preserve `packages/config/*.tar.gz`
+- Full workspace setup
+  - ./omw all  # build -> app -> config
 
 Common options:
 - --force    Force reinstallation (backs up existing install)
@@ -59,33 +59,34 @@ Common options:
 Examples:
 ```bash
 # Force rebuild vim
-./omw --build vim --force
+./omw build vim --force
 
 # See installed and installable software/apps
-./omw --status
+./omw status
 
 # Check for newer configured versions
-./omw --check-updates
+./omw update check
 
 # Install the exa CLI
-./omw --install exa
+./omw app install exa
 
 # Create a portable offline bundle
-./omw --pack
+./omw offline pack
 ```
 
 ## Software and Apps
-Software and apps are defined in `software.conf` via arrays such as:
-- SOFTWARE_LIST, SOFTWARE_VERSIONS, SOFTWARE_URLS, SOFTWARE_DEPS, SOFTWARE_CONFIG_CMDS, SOFTWARE_CFLAGS, SOFTWARE_LDFLAGS
-- APP_LIST, APP_VERSIONS, APP_URLS, APP_EXECUTABLE_NAME, APP_SOURCE_URLS
+Software and apps are declared in `packages.sh` with Bash 4-compatible registration functions:
+- `software <name> <version> <url> <deps> <build-command> <cflags> <ldflags>`
+- `app <name> <version> <url> <executable> <source-url> <bin-dirs>`
 
-You can add or override entries in `software.conf` to customize builds and app sources.
+Declare the same software more than once to support multiple versions. The registration functions populate OMW's internal arrays automatically, including version-specific dependency keys.
+Use `-` as the placeholder for empty fields; do not omit positional fields.
 
 ## Modulefiles
 Each built package gets a modulefile under:
 - tools/modulefiles/<name>/<name>-<version>
 
-OMW automatically adds PATH, LD_LIBRARY_PATH, PKG_CONFIG_PATH, and include paths. Custom CFLAGS/LDFLAGS from `software.conf` are also injected when present.
+OMW automatically adds PATH, LD_LIBRARY_PATH, PKG_CONFIG_PATH, and include paths. Custom CFLAGS/LDFLAGS from `packages.sh` are also injected when present.
 
 ## Local (System RPM) Layer
 The `local` pseudo-software pulls RPMs (or uses `packages/rpms.tar.gz`), extracts them into a private prefix, fixes common path issues, adjusts pkg-config files, and exposes the layer via a module. Useful for environments without root access.
@@ -132,6 +133,7 @@ make pack-configs OUT_DIR=packages/config
 
 ## Directory Layout
 - config/                Config resources (tmux, zsh)
+- lib/                   OMW implementation modules grouped by responsibility
 - packages/              Downloaded source and app archives (+ SHA256SUMS)
 - builds/                Temporary build directories
 - tools/software/        Installed software prefixes
@@ -139,7 +141,15 @@ make pack-configs OUT_DIR=packages/config
 - apps/                  Installed app payloads
 - bin/                   Symlinks for installed apps
 
-Apps can optionally define `APP_SOURCE_URLS`; those source archives are downloaded and verified for offline bundles.
+Implementation modules under `lib/` are intentionally coarse-grained:
+- common.sh: initialization, logging, filesystem helpers, downloads, extraction
+- status.sh: status tables and upstream update checks
+- build.sh: source-build orchestration, package-specific builders, modulefiles
+- app.sh: prebuilt app installation and app-specific installers
+- config.sh: tmux/vim/zsh configuration flows and shell environment setup
+- offline.sh: offline asset verification, config packaging, bundle creation
+
+Apps can optionally declare source archives in `packages.sh`; those source archives are downloaded and verified for offline bundles.
 
 ## Troubleshooting
 - Missing dependencies: Run `./omw` on a machine with the listed system tools or install them first.
@@ -150,4 +160,4 @@ Apps can optionally define `APP_SOURCE_URLS`; those source archives are download
 
 ## Notes
 - OMW sets `OMW_HOME` internally; it also injects OMW sourcing lines into zsh if missing.
-- For reproducibility, avoid modifying generated modulefiles; edit `software.conf` instead.
+- For reproducibility, avoid modifying generated modulefiles; edit `packages.sh` instead.

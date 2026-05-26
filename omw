@@ -7,2472 +7,441 @@ if ((BASH_VERSINFO[0] < 4)); then
 fi
 
 declare spinner_pid
+OMW_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+declare -a SOFTWARE_LIST APP_LIST CONFIG_BACKUP_PATHS
+declare -A SOFTWARE_VERSIONS SOFTWARE_URLS SOFTWARE_DEPS SOFTWARE_CONFIG_CMDS SOFTWARE_CFLAGS SOFTWARE_LDFLAGS
+declare -A APP_VERSIONS APP_URLS APP_EXECUTABLE_NAME APP_SOURCE_URLS APP_BIN_DIRS
 
 # Trap SIGINT (Ctrl+C) for graceful shutdown
-handle_sigint() {
-	log "Interrupt signal (SIGINT) received. Exiting..." "WARN"
-	stop_spinner
+_omw_cli_handle_sigint() {
+	omw_log "Interrupt signal (SIGINT) received. Exiting..." "WARN"
+	omw_stop_spinner
 	exit 130
 }
-trap 'handle_sigint' SIGINT
-trap 'stop_spinner' EXIT
+trap '_omw_cli_handle_sigint' SIGINT
+trap 'omw_stop_spinner' EXIT
 
-###############################################################################
-# Global Configuration and Initialization
-###############################################################################
-init_globals() {
-	OMW_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-	cd "$OMW_HOME"
-	# Source environment variables if they exist
-	# shellcheck disable=SC1091
-	[[ -f "$OMW_HOME/env.sh" ]] && source "$OMW_HOME/env.sh"
+_omw_cli_source_module() {
+	local module="$1"
+	local path="$OMW_HOME/$module"
 
-	# Define core paths
-	CONFIG_PATH="$OMW_HOME/config"
-	PACKAGES_PATH="$OMW_HOME/packages"
-	BUILDS_PATH="$OMW_HOME/builds"
-	SOFTWARE_INSTALL_PATH="$OMW_HOME/tools/software"
-	MODULEFILES_PATH="$OMW_HOME/tools/modulefiles"
-	APPS_INSTALL_PATH="$OMW_HOME/apps"
-	SCRIPTS_BIN_PATH="$OMW_HOME/bin"
+	if [[ ! -f "$path" ]]; then
+		echo "ERROR: OMW module not found: $path" >&2
+		exit 2
+	fi
+	# shellcheck source=/dev/null
+	source "$path"
+}
 
-	# Ensure core directories exist
-	readonly DIRECTORIES=(
-		"$CONFIG_PATH" "$PACKAGES_PATH/software" "$PACKAGES_PATH/apps"
-		"$PACKAGES_PATH/config" "$BUILDS_PATH" "$SOFTWARE_INSTALL_PATH" "$MODULEFILES_PATH" "$APPS_INSTALL_PATH" "$SCRIPTS_BIN_PATH"
-	)
-	for dir in "${DIRECTORIES[@]}"; do
-		[[ ! -d "$dir" ]] && mkdir -p "$dir"
-	done
+_omw_cli_source_module "lib/common.sh"
+_omw_cli_source_module "lib/status.sh"
+_omw_cli_source_module "lib/build.sh"
+_omw_cli_source_module "lib/app.sh"
+_omw_cli_source_module "lib/config.sh"
+_omw_cli_source_module "lib/offline.sh"
 
-	# Load software definitions from configuration file
-	local conf_file="$OMW_HOME/software.conf"
-	if [[ -f "$conf_file" ]]; then
-		log "Loading definitions from $conf_file" "INFO"
-		# shellcheck source=/dev/null
-		source "$conf_file"
-	else
-		log "Configuration file not found: $conf_file. Cannot proceed." "ERROR"
+_omw_cli_print_help() {
+	cat <<-EOF
+		Usage:
+		  $0 <area> <action> [target] [options]
+		  $0 <legacy-command> [target] [options]
+
+		OMW - build source tools, install apps, and apply workspace configs.
+
+		Build:
+		  build <software[@version]>      Build source software
+		  build all                       Build all configured source software
+		  --build, -b <target>            Legacy alias for build
+
+		App:
+		  app install <app>               Install a prebuilt app
+		  app install-all                 Install all prebuilt apps
+		  --install, -i <app>             Legacy alias for app install
+		  --install-all-apps              Legacy alias for app install-all
+
+		Config:
+		  config <tmux|vim|zsh>           Apply one shell/editor config
+		  config all                      Apply tmux, vim, and zsh configs
+		  init                            Add OMW env sourcing to ~/.bashrc
+		  --config, -c <target>           Legacy alias for config
+
+		Offline:
+		  offline pack                    Create an offline deployment bundle
+		  offline verify                  Verify offline assets
+		  --pack, -p                      Legacy alias for offline pack
+		  --verify-offline                Legacy alias for offline verify
+
+		Status:
+		  status                          Show installable and installed items
+		  status installed                Show installed or partially installed items
+		  update check                    Check supported upstream versions
+		  --status, --list, --installed   Legacy status aliases
+		  --check-updates                 Legacy alias for update check
+
+		Maintenance:
+		  clean <builds|packages|installs|apps|all>
+		                                  packages keeps packages/config/*.tar.gz
+		  all                             Run build -> app -> config
+
+		Options:
+		  --force                         Force rebuild/reinstall where supported
+		  --refresh                       Only refresh modulefiles for source builds
+		  -h, --help                      Show this help
+
+		Examples:
+		  $0 build vim
+		  $0 build python@3.12.12 --force
+		  $0 app install rg
+		  $0 config zsh
+		  $0 offline verify
+		  $0 status installed
+
+		Software to build: ${SOFTWARE_LIST[*]}
+		Apps to install: ${APP_LIST[*]}
+	EOF
+}
+
+_omw_cli_parse() {
+	OMW_COMMAND=""
+	OMW_TARGET=""
+	OMW_FORCE=false
+	OMW_REFRESH=false
+
+	[[ $# -eq 0 ]] && {
+		OMW_COMMAND="help"
+		return 0
+	}
+
+	case "$1" in
+	-h | --help | help)
+		OMW_COMMAND="help"
+		shift
+		;;
+	all | -a | --all)
+		OMW_COMMAND="all"
+		shift
+		;;
+	init | --init)
+		OMW_COMMAND="init"
+		shift
+		;;
+	build | -b | --build)
+		OMW_COMMAND="build"
+		shift
+		[[ $# -gt 0 && "$1" != --* ]] && {
+			OMW_TARGET="$1"
+			shift
+		}
+		;;
+	app)
+		shift
+		case "${1:-}" in
+		install)
+			OMW_COMMAND="app-install"
+			shift
+			[[ $# -gt 0 && "$1" != --* ]] && {
+				OMW_TARGET="$1"
+				shift
+			}
+			;;
+		install-all | all)
+			OMW_COMMAND="app-install-all"
+			shift
+			;;
+		*)
+			omw_log "Invalid app action. Use: app install <app> or app install-all." "ERROR"
+			exit 1
+			;;
+		esac
+		;;
+	-i | --install)
+		OMW_COMMAND="app-install"
+		shift
+		[[ $# -gt 0 && "$1" != --* ]] && {
+			OMW_TARGET="$1"
+			shift
+		}
+		;;
+	--install-all-apps)
+		OMW_COMMAND="app-install-all"
+		shift
+		;;
+	config | -c | --config)
+		OMW_COMMAND="config"
+		shift
+		[[ $# -gt 0 && "$1" != --* ]] && {
+			OMW_TARGET="$1"
+			shift
+		}
+		;;
+	offline)
+		shift
+		case "${1:-}" in
+		pack)
+			OMW_COMMAND="offline-pack"
+			shift
+			;;
+		verify)
+			OMW_COMMAND="offline-verify"
+			shift
+			;;
+		*)
+			omw_log "Invalid offline action. Use: offline pack or offline verify." "ERROR"
+			exit 1
+			;;
+		esac
+		;;
+	-p | --pack)
+		OMW_COMMAND="offline-pack"
+		shift
+		;;
+	--verify-offline)
+		OMW_COMMAND="offline-verify"
+		shift
+		;;
+	status | --status | --list)
+		OMW_COMMAND="status"
+		shift
+		if [[ "${1:-}" == "installed" ]]; then
+			OMW_TARGET="installed"
+			shift
+		fi
+		;;
+	--installed)
+		OMW_COMMAND="status"
+		OMW_TARGET="installed"
+		shift
+		;;
+	update)
+		shift
+		if [[ "${1:-}" != "check" ]]; then
+			omw_log "Invalid update action. Use: update check." "ERROR"
+			exit 1
+		fi
+		OMW_COMMAND="update-check"
+		shift
+		;;
+	--check-updates)
+		OMW_COMMAND="update-check"
+		shift
+		;;
+	clean | --clean)
+		OMW_COMMAND="clean"
+		shift
+		[[ $# -gt 0 && "$1" != --* ]] && {
+			OMW_TARGET="$1"
+			shift
+		}
+		;;
+	*)
+		omw_log "Invalid command: $1" "ERROR"
+		_omw_cli_print_help
 		exit 1
-	fi
-
-	# Set build-related constants
-	local core_count
-	if command -v nproc &>/dev/null; then
-		core_count=$(nproc)
-	elif command -v sysctl &>/dev/null; then
-		core_count=$(sysctl -n hw.ncpu 2>/dev/null || echo 1)
-	else
-		core_count=1
-	fi
-	if ((core_count > 2)); then
-		readonly BUILD_JOBS=$((core_count - 2))
-	else
-		readonly BUILD_JOBS=1
-	fi
-
-	readonly MAX_RETRIES=3
-	readonly DOWNLOAD_TIMEOUT=300
-	readonly GCC_PREREQ_BASE_URL='http://gcc.gnu.org/pub/gcc/infrastructure/'
-	declare -ga CONFIG_BACKUP_PATHS=()
-	return 0
-}
-
-###############################################################################
-# Utility Functions
-###############################################################################
-log() {
-	local msg="$1"
-	local level="${2:-INFO}"
-	local ts
-	ts=$(date +"%T")
-	declare -A c=([DEBUG]=34 [INFO]=36 [WARN]=33 [ERROR]=31 [SUCCESS]=32)
-	echo -e "\033[1;${c[$level]:-36}m[${ts}] [${level}] - ${msg}\033[0m" >&2
-}
-
-start_spinner() {
-	[[ "$OMW_NO_SPINNER" == "1" ]] && return 0
-	spinner &
-	spinner_pid=$!
-}
-
-stop_spinner() {
-	if [[ -n "$spinner_pid" ]]; then
-		# Kill the spinner process and wait for it to terminate
-		kill -s TERM "$spinner_pid" 2>/dev/null
-		wait "$spinner_pid" 2>/dev/null
-		spinner_pid=""
-	fi
-	echo -ne "\r\033[K" >&2
-}
-
-spinner() {
-	trap 'exit 0' TERM
-	while :; do
-		for c in / - \\ \|; do
-			echo -ne "\r\033[1;36m[INFO] $(date +"%T") - Processing ${c}" >&2
-			sleep 0.1
-		done
-	done
-}
-
-check_sys_deps() {
-	log "Checking system dependencies..." "INFO"
-	local missing_deps=0
-	for cmd in wget tar make git rpm2cpio cpio sed find nproc yumdownloader unzip pushd popd; do
-		if ! command -v "$cmd" &>/dev/null; then
-			log "Missing command: $cmd" "ERROR"
-			missing_deps=1
-		fi
-	done
-	if ((missing_deps)); then exit 1; fi
-	log "System dependencies are satisfied." "SUCCESS"
-	return 0
-}
-
-file_size() {
-	local path="$1"
-	if stat -c%s "$path" &>/dev/null; then
-		stat -c%s "$path"
-	else
-		stat -f%z "$path"
-	fi
-}
-
-ensure_valid_cwd() {
-	if ! pwd -P >/dev/null 2>&1; then
-		log "Current directory is no longer accessible; switching to $OMW_HOME" "WARN"
-		cd "$OMW_HOME"
-	fi
-}
-
-safe_rm_rf() {
-	local path="$1"
-	ensure_valid_cwd
-	if [[ -z "$path" || "$path" == "/" ]]; then
-		log "Refusing to remove unsafe path: '${path}'" "ERROR"
-		return 1
-	fi
-	rm -rf -- "$path"
-}
-
-clear_directory_contents() {
-	local path="$1"
-	if [[ -z "$path" || "$path" == "/" ]]; then
-		log "Refusing to clear unsafe directory: '${path}'" "ERROR"
-		return 1
-	fi
-	mkdir -p "$path"
-	find "$path" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-}
-
-backup_path_once() {
-	local path="$1"
-	local reason="${2:-config}"
-	local backup_dir backup_path stamp suffix=0
-
-	stamp=$(date +%Y%m%d%H%M%S)
-	backup_dir="$OMW_HOME/backups/$reason/$stamp"
-	while [[ -e "$backup_dir/$(basename "$path")" || -L "$backup_dir/$(basename "$path")" ]]; do
-		((++suffix))
-		backup_dir="$OMW_HOME/backups/$reason/$stamp-$suffix"
-	done
-
-	[[ -e "$path" || -L "$path" ]] || return 0
-	mkdir -p "$backup_dir"
-	backup_path="$backup_dir/$(basename "$path")"
-	cp -a "$path" "$backup_path"
-	log "Backed up $path to $backup_path" "INFO"
-	printf '%s\n' "$backup_path"
-}
-
-backup_path_for_config() {
-	local path="$1"
-	local reason="${2:-config}"
-	local backup_path
-
-	backup_path=$(backup_path_once "$path" "$reason")
-	if [[ -n "$backup_path" ]]; then
-		CONFIG_BACKUP_PATHS+=("$backup_path")
-	fi
-}
-
-print_config_backup_paths() {
-	local path
-
-	((${#CONFIG_BACKUP_PATHS[@]} == 0)) && return 0
-	log "Backup files created:" "INFO"
-	for path in "${CONFIG_BACKUP_PATHS[@]}"; do
-		echo "  - $path" >&2
-	done
-}
-
-safe_link_with_backup() {
-	local source="$1"
-	local dest="$2"
-	local reason="${3:-config}"
-	local current_target
-
-	if [[ -L "$dest" ]]; then
-		current_target=$(readlink "$dest")
-		[[ "$current_target" == "$source" ]] && return 0
-		backup_path_for_config "$dest" "$reason"
-		rm -f "$dest"
-	elif [[ -e "$dest" ]]; then
-		backup_path_for_config "$dest" "$reason"
-		rm -rf "$dest"
-	fi
-
-	ln -s "$source" "$dest"
-}
-
-link_if_absent_with_backup() {
-	local source="$1"
-	local dest="$2"
-	local reason="${3:-config}"
-
-	if [[ -L "$dest" ]]; then
-		[[ "$(readlink "$dest")" == "$source" ]] && return 0
-		backup_path_for_config "$dest" "$reason"
-		log "Keeping existing symlink $dest unchanged." "INFO"
-		return 0
-	elif [[ -e "$dest" ]]; then
-		backup_path_for_config "$dest" "$reason"
-		log "Keeping existing $dest unchanged." "INFO"
-		return 0
-	fi
-
-	ln -s "$source" "$dest"
-}
-
-copy_if_absent_with_backup() {
-	local source="$1"
-	local dest="$2"
-	local reason="${3:-config}"
-
-	if [[ -e "$dest" || -L "$dest" ]]; then
-		backup_path_for_config "$dest" "$reason"
-		log "Keeping existing $dest unchanged." "INFO"
-		return 0
-	fi
-
-	cp "$source" "$dest"
-}
-
-append_line_with_backup() {
-	local file="$1"
-	local marker="$2"
-	local content="$3"
-	local reason="${4:-config}"
-
-	if [[ -f "$file" ]] && grep -q "$marker" "$file"; then
-		return 0
-	fi
-	[[ -e "$file" || -L "$file" ]] && backup_path_for_config "$file" "$reason"
-	printf '%s\n' "$content" >>"$file"
-}
-
-extract_rpms_to_prefix() {
-	local rpm_dir="$1"
-	local prefix="$2"
-
-	mkdir -p "$prefix"
-	log "Extracting RPMs to $prefix..." "INFO"
-	pushd "$prefix" >/dev/null
-	if ! find "$rpm_dir" -maxdepth 1 -name "*.rpm" -print0 | while IFS= read -r -d $'\0' rpm; do
-		rpm2cpio "$rpm" | cpio -idmu --quiet
-	done; then
-		popd >/dev/null
-		log "RPM extraction failed." "ERROR"
-		return 1
-	fi
-	popd >/dev/null
-}
-
-repair_broken_lib64_links() {
-	local lib64_dir="$1"
-	local prefix="$2"
-	local link target basename repaired=0 unresolved=0
-	local prefix_lib64=""
-
-	[[ -d "$lib64_dir" ]] || return 0
-	[[ -n "$prefix" ]] && prefix_lib64="$prefix/usr/lib64"
-
-	log "Checking broken links in $lib64_dir..." "INFO"
-	while IFS= read -r -d $'\0' link; do
-		target=$(readlink "$link")
-		[[ -n "$target" ]] || continue
-
-		basename=$(basename "$target")
-		if [[ -n "$prefix_lib64" && -e "$prefix_lib64/$basename" ]]; then
-			ln -snf "$prefix_lib64/$basename" "$link"
-			log "Repaired $(basename "$link") -> $prefix_lib64/$basename" "INFO"
-			((++repaired))
-			continue
-		fi
-
-		log "Broken lib64 link unresolved: $link -> $target" "WARN"
-		((++unresolved))
-	done < <(find "$lib64_dir" -xtype l -print0)
-
-	log "lib64 link repair complete: repaired=$repaired unresolved=$unresolved" "SUCCESS"
-}
-
-strip_version_prefix() {
-	local version="$1"
-	version="${version#release-}"
-	version="${version#v}"
-	version="${version%-stable}"
-	printf '%s' "$version"
-}
-
-version_major() {
-	local version="$1"
-	version=$(strip_version_prefix "$version")
-	printf '%s' "${version%%.*}"
-}
-
-filter_versions_by_major() {
-	local current="$1"
-	local current_major candidate
-	current_major=$(version_major "$current")
-	while IFS= read -r candidate; do
-		[[ -n "$candidate" ]] || continue
-		[[ "$(version_major "$candidate")" == "$current_major" ]] && printf '%s\n' "$candidate"
-	done
-}
-
-filter_openssl_compat_versions() {
-	local current="$1"
-	local candidate
-	while IFS= read -r candidate; do
-		[[ -n "$candidate" ]] || continue
-		if [[ "$current" == 1.1.1* ]]; then
-			[[ "$candidate" == 1.1.1* ]] && printf '%s\n' "$candidate"
-		else
-			[[ "$(version_major "$candidate")" == "$(version_major "$current")" ]] && printf '%s\n' "$candidate"
-		fi
-	done
-}
-
-version_gt() {
-	local candidate="$1"
-	local current="$2"
-	[[ -n "$candidate" && -n "$current" && "$candidate" != "$current" ]] || return 1
-	[[ "$(printf '%s\n%s\n' "$current" "$candidate" | sort -V | tail -n 1)" == "$candidate" ]]
-}
-
-fetch_url() {
-	local url="$1"
-	wget -q -T 20 -O - "$url"
-}
-
-latest_from_github() {
-	local url="$1"
-	local owner repo api latest
-
-	if [[ "$url" =~ github\.com/([^/]+)/([^/]+)/ ]]; then
-		owner="${BASH_REMATCH[1]}"
-		repo="${BASH_REMATCH[2]}"
-		api="https://api.github.com/repos/$owner/$repo/releases/latest"
-		latest=$(fetch_url "$api" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)
-		if [[ -z "$latest" ]]; then
-			api="https://api.github.com/repos/$owner/$repo/tags"
-			latest=$(fetch_url "$api" | sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1 || true)
-		fi
-		strip_version_prefix "$latest"
-	fi
-}
-
-latest_from_directory_listing() {
-	local url="$1"
-	local pattern="$2"
-	(fetch_url "$url" || true) |
-		sed -n "s|.*$pattern.*|\\1|p" |
-		sort -V |
-		tail -n 1
-}
-
-latest_from_directory_listing_same_major() {
-	local url="$1"
-	local pattern="$2"
-	local current="$3"
-	(fetch_url "$url" || true) |
-		sed -n "s|.*$pattern.*|\\1|p" |
-		filter_versions_by_major "$current" |
-		sort -V |
-		tail -n 1
-}
-
-latest_openssl_version() {
-	local current="$1"
-	(fetch_url "https://www.openssl.org/source/" || true) |
-		sed -n 's|.*openssl-\([0-9][0-9A-Za-z.]*\)\.tar.*|\1|p' |
-		filter_openssl_compat_versions "$current" |
-		sort -V |
-		tail -n 1
-}
-
-latest_software_version() {
-	local name="$1"
-	local current="$2"
-	local url
-	url=$(_get_software_url "$name" "$current")
-
-	case "$url" in
-	*github.com*)
-		latest_from_github "$url"
-		;;
-	*python.org/ftp/python/*)
-		latest_from_directory_listing_same_major "https://www.python.org/ftp/python/" 'href="\([0-9][0-9.]*\)/"' "$current"
-		;;
-	*ftp.gnu.org/gnu/ncurses/*)
-		latest_from_directory_listing "https://ftp.gnu.org/gnu/ncurses/" 'ncurses-\([0-9][0-9.]*\)\.tar'
-		;;
-	*openssl.org/source/*)
-		latest_openssl_version "$current"
-		;;
-	*lua.org/ftp/*)
-		latest_from_directory_listing "https://www.lua.org/ftp/" 'lua-\([0-9][0-9.]*\)\.tar'
-		;;
-	*sourceforge.net/projects/zsh/files/zsh/*)
-		latest_from_directory_listing_same_major "https://sourceforge.net/projects/zsh/files/zsh/" '/zsh/\([0-9][0-9.]*\)/' "$current"
-		;;
-	*)
-		printf ''
 		;;
 	esac
-}
 
-latest_app_version() {
-	local name="$1"
-	local url="${APP_URLS[$name]:-}"
-
-	case "$url" in
-	*github.com*)
-		latest_from_github "$url"
-		;;
-	*)
-		printf ''
-		;;
-	esac
-}
-
-check_updates() {
-	local name version versions_str latest checked=0 updates=0 unsupported=0
-	local -A listed_software=()
-
-	if ! command -v wget &>/dev/null; then
-		log "wget is required for --check-updates." "ERROR"
-		return 1
-	fi
-
-	ui_section "Software updates"
-	printf '%-14s %-14s %-14s %s\n' "Name" "Current" "Latest" "Status"
-	for name in "${SOFTWARE_LIST[@]}"; do
-		listed_software["$name"]=1
-		versions_str="${SOFTWARE_VERSIONS[$name]:-}"
-		[[ -z "$versions_str" ]] && continue
-		for version in $versions_str; do
-			latest=$(latest_software_version "$name" "$version")
-			if [[ -z "$latest" ]]; then
-				printf '%-14s %-14s %-14s %s\n' "$name" "$version" "-" "unsupported source"
-				((++unsupported))
-			elif version_gt "$latest" "$version"; then
-				printf '%-14s %-14s %-14s %s\n' "$name" "$version" "$latest" "$(ui_status available)"
-				((++updates))
-			else
-				printf '%-14s %-14s %-14s %s\n' "$name" "$version" "$latest" "current"
-			fi
-			((++checked))
-		done
+	while [[ $# -gt 0 ]]; do
+		case "$1" in
+		--force)
+			OMW_FORCE=true
+			shift
+			;;
+		--refresh)
+			OMW_REFRESH=true
+			shift
+			;;
+		-h | --help)
+			OMW_COMMAND="help"
+			shift
+			;;
+		*)
+			omw_log "Unexpected argument for '$OMW_COMMAND': $1" "ERROR"
+			exit 1
+			;;
+		esac
 	done
-	for name in "${!SOFTWARE_VERSIONS[@]}"; do
-		[[ -n "${listed_software[$name]:-}" ]] && continue
-		for version in ${SOFTWARE_VERSIONS[$name]}; do
-			latest=$(latest_software_version "$name" "$version")
-			if [[ -z "$latest" ]]; then
-				printf '%-14s %-14s %-14s %s\n' "$name" "$version" "-" "unsupported source"
-				((++unsupported))
-			elif version_gt "$latest" "$version"; then
-				printf '%-14s %-14s %-14s %s\n' "$name" "$version" "$latest" "$(ui_status available)"
-				((++updates))
-			else
-				printf '%-14s %-14s %-14s %s\n' "$name" "$version" "$latest" "current"
-			fi
-			((++checked))
-		done
-	done
-
-	ui_section "App updates"
-	printf '%-14s %-14s %-14s %s\n' "Name" "Current" "Latest" "Status"
-	for name in "${APP_LIST[@]}"; do
-		version="${APP_VERSIONS[$name]:-}"
-		[[ -z "$version" ]] && continue
-		latest=$(latest_app_version "$name")
-		if [[ -z "$latest" ]]; then
-			printf '%-14s %-14s %-14s %s\n' "$name" "$version" "-" "unsupported source"
-			((++unsupported))
-		elif version_gt "$latest" "$version"; then
-			printf '%-14s %-14s %-14s %s\n' "$name" "$version" "$latest" "$(ui_status available)"
-			((++updates))
-		else
-			printf '%-14s %-14s %-14s %s\n' "$name" "$version" "$latest" "current"
-		fi
-		((++checked))
-	done
-
-	printf '\nChecked: %d, updates: %d, unsupported: %d\n' "$checked" "$updates" "$unsupported"
-	if ((updates > 0)); then
-		log "New versions are available. Update software.conf intentionally, then build/install the target." "WARN"
-	else
-		log "No newer versions detected for supported sources." "SUCCESS"
-	fi
 }
 
-contains_word() {
-	local needle="$1"
-	local haystack="$2"
-	local item
-	for item in $haystack; do
-		[[ "$item" == "$needle" ]] && return 0
-	done
-	return 1
-}
-
-ui_supports_color() {
-	[[ -t 1 && -z "${NO_COLOR:-}" ]]
-}
-
-ui_color() {
-	local code="$1"
-	local text="$2"
-	if ui_supports_color; then
-		printf '\033[%sm%s\033[0m' "$code" "$text"
-	else
-		printf '%s' "$text"
-	fi
-}
-
-ui_status() {
-	local status="$1"
-	case "$status" in
-	installed) ui_color "1;32" "installed" ;;
-	partial) ui_color "1;33" "partial" ;;
-	missing) ui_color "1;31" "missing" ;;
-	available) ui_color "1;36" "available" ;;
-	*) printf '%s' "$status" ;;
-	esac
-}
-
-ui_section() {
-	local title="$1"
-	printf '\n%s\n' "$(ui_color "1;36" "$title")"
-	printf '%*s\n' "${#title}" "" | tr ' ' '-'
-}
-
-software_prefix() {
-	local name="$1"
-	local version="$2"
-	printf '%s/%s/%s-%s' "$SOFTWARE_INSTALL_PATH" "$name" "$name" "$version"
-}
-
-software_modulefile() {
-	local name="$1"
-	local version="$2"
-	printf '%s/%s/%s-%s' "$MODULEFILES_PATH" "$name" "$name" "$version"
-}
-
-software_package_path() {
-	local name="$1"
-	local version="$2"
-	local url
-	url=$(_get_software_url "$name" "$version")
-	[[ -z "$url" ]] && return 1
-	printf '%s/software/%s' "$PACKAGES_PATH" "$(basename "$url")"
-}
-
-software_install_status() {
-	local name="$1"
-	local version="$2"
-	local prefix modulefile
-	prefix=$(software_prefix "$name" "$version")
-	modulefile=$(software_modulefile "$name" "$version")
-	if [[ -d "$prefix" && -f "$modulefile" ]]; then
-		printf 'installed'
-	elif [[ -d "$prefix" || -f "$modulefile" ]]; then
-		printf 'partial'
-	else
-		printf 'available'
-	fi
-}
-
-app_install_status() {
-	local app="$1"
-	local version="${APP_VERSIONS[$app]}"
-	local exec_name="${APP_EXECUTABLE_NAME[$app]}"
-	local bin_dirs="${APP_BIN_DIRS[$app]:-}"
-	local install_dir="$APPS_INSTALL_PATH/$app-$version"
-	local symlink_path="$SCRIPTS_BIN_PATH/$exec_name"
-
-	if [[ "$app" == "hack-nerd-font" ]]; then
-		hack_nerd_font_installed && printf 'installed' || printf 'available'
-	elif [[ "$exec_name" == "special" ]]; then
-		[[ -d "$HOME/.autojump" || -d "$install_dir" ]] && printf 'installed' || printf 'available'
-	elif [[ -n "$bin_dirs" ]]; then
-		app_bin_dir_install_status "$app" "$install_dir"
-	elif [[ -L "$symlink_path" && -d "$install_dir" ]]; then
-		printf 'installed'
-	elif [[ -L "$symlink_path" || -d "$install_dir" ]]; then
-		printf 'partial'
-	else
-		printf 'available'
-	fi
-}
-
-config_install_status() {
-	local target="$1"
-	case "$target" in
-	tmux)
-		[[ -d "$CONFIG_PATH/tmux/.tmux" || -L "$HOME/.tmux.conf" ]] && printf 'installed' || printf 'available'
-		;;
-	vim)
-		[[ -d "$CONFIG_PATH/vim/vim9" && -f "$HOME/.vimrc" ]] && printf 'installed' || printf 'available'
-		;;
-	zsh)
-		[[ -d "$CONFIG_PATH/zsh/.oh-my-zsh" || -L "$HOME/.oh-my-zsh" ]] && printf 'installed' || printf 'available'
-		;;
-	*)
-		printf 'available'
-		;;
-	esac
-}
-
-print_status() {
-	local show_all="${1:-true}"
-	local name version versions_str status pkg cmd
-	local -A listed_software=()
-
-	printf '%s\n' "$(ui_color "1;37" "OMW package view")"
-	printf 'Home: %s\n' "$OMW_HOME"
-
-	ui_section "Source builds"
-	printf '%-14s %-14s %-12s %-10s %s\n' "Name" "Version" "State" "Package" "Command"
-	for name in "${SOFTWARE_LIST[@]}"; do
-		listed_software["$name"]=1
-		versions_str="${SOFTWARE_VERSIONS[$name]:-}"
-		if [[ -z "$versions_str" ]]; then
-			printf '%-14s %-14s %-12s %-10s %s\n' "$name" "-" "$(ui_status missing)" "-" "missing version definition"
-			continue
-		fi
-		for version in $versions_str; do
-			status=$(software_install_status "$name" "$version")
-			[[ "$show_all" == "false" && "$status" != "installed" && "$status" != "partial" ]] && continue
-			pkg="-"
-			if software_package_path "$name" "$version" >/dev/null; then
-				pkg=$(software_package_path "$name" "$version")
-				[[ -f "$pkg" ]] && pkg="cached" || pkg="needed"
-			fi
-			cmd="./omw --build $name@$version"
-			printf '%-14s %-14s %-12s %-10s %s\n' "$name" "$version" "$(ui_status "$status")" "$pkg" "$cmd"
-		done
-	done
-	for name in "${!SOFTWARE_VERSIONS[@]}"; do
-		[[ -n "${listed_software[$name]:-}" ]] && continue
-		versions_str="${SOFTWARE_VERSIONS[$name]:-}"
-		for version in $versions_str; do
-			status=$(software_install_status "$name" "$version")
-			[[ "$show_all" == "false" && "$status" != "installed" && "$status" != "partial" ]] && continue
-			pkg="-"
-			if software_package_path "$name" "$version" >/dev/null; then
-				pkg=$(software_package_path "$name" "$version")
-				[[ -f "$pkg" ]] && pkg="cached" || pkg="needed"
-			fi
-			cmd="./omw --build $name@$version (extra)"
-			printf '%-14s %-14s %-12s %-10s %s\n' "$name" "$version" "$(ui_status "$status")" "$pkg" "$cmd"
-		done
-	done
-
-	ui_section "Prebuilt apps"
-	printf '%-14s %-14s %-12s %-10s %s\n' "Name" "Version" "State" "Package" "Command"
-	for name in "${APP_LIST[@]}"; do
-		version="${APP_VERSIONS[$name]:-}"
-		url="${APP_URLS[$name]:-}"
-		cmd="${APP_EXECUTABLE_NAME[$name]:-}"
-		if [[ -z "$version" || -z "$url" || -z "$cmd" ]]; then
-			printf '%-14s %-14s %-12s %-10s %s\n' "$name" "-" "$(ui_status missing)" "-" "incomplete definition"
-			continue
-		fi
-		status=$(app_install_status "$name")
-		[[ "$show_all" == "false" && "$status" != "installed" && "$status" != "partial" ]] && continue
-		pkg="$PACKAGES_PATH/apps/$(basename "$url")"
-		[[ -f "$pkg" ]] && pkg="cached" || pkg="needed"
-		cmd="./omw --install $name"
-		printf '%-14s %-14s %-12s %-10s %s\n' "$name" "$version" "$(ui_status "$status")" "$pkg" "$cmd"
-	done
-
-	ui_section "Shell configs"
-	printf '%-14s %-14s %-12s %s\n' "Name" "Target" "State" "Command"
-	for name in tmux vim zsh; do
-		status=$(config_install_status "$name")
-		[[ "$show_all" == "false" && "$status" != "installed" && "$status" != "partial" ]] && continue
-		printf '%-14s %-14s %-12s %s\n' "$name" "$name" "$(ui_status "$status")" "./omw --config $name"
-	done
-
-	printf '\nInstall commands: %s, %s, %s\n' \
-		"$(ui_color "36" "./omw --build <name[@version]>")" \
-		"$(ui_color "36" "./omw --install <app>")" \
-		"$(ui_color "36" "./omw --all")"
-}
-
-clone_repo_once() {
-	local url="$1"
-	local dest="$2"
-	local backup_dest=""
-	local clone_log=""
-	if [[ -d "$dest/.git" ]]; then
-		log "Repository exists: $dest" "INFO"
-		return 0
-	fi
-	if [[ -d "$dest" ]] && find "$dest" -mindepth 1 -print -quit | grep -q .; then
-		log "Using existing non-git directory as an offline copy: $dest" "WARN"
-		return 0
-	fi
-	if [[ -e "$dest" ]]; then
-		backup_dest="${dest}.backup-$(date +%Y%m%d%H%M%S)"
-		log "Destination exists but is not a usable git repo copy: $dest; moving it to $backup_dest." "WARN"
-		mv "$dest" "$backup_dest"
-	fi
-	local tmp_dest="${dest}.tmp-$$"
-	safe_rm_rf "$tmp_dest"
-	clone_log=$(mktemp)
-	if ! GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$tmp_dest" 2>"$clone_log"; then
-		log "Git clone failed for $url. Last output:" "WARN"
-		cat "$clone_log" >&2
-		safe_rm_rf "$tmp_dest"
-		rm -f "$clone_log"
-		if fetch_github_repo_snapshot "$url" "$dest"; then
-			[[ -n "$backup_dest" ]] && log "Previous non-git destination was kept at $backup_dest." "WARN"
-			return 0
-		fi
-		if [[ -n "$backup_dest" && -e "$backup_dest" && ! -e "$dest" ]]; then
-			log "Restoring previous non-git destination after fetch failure: $dest" "WARN"
-			mv "$backup_dest" "$dest"
-		fi
-		return 1
-	fi
-	rm -f "$clone_log"
-	mv "$tmp_dest" "$dest"
-	[[ -n "$backup_dest" ]] && log "Previous non-git destination was kept at $backup_dest." "WARN"
-	return 0
-}
-
-github_archive_url() {
-	local url="$1"
-	local owner repo
-
-	if [[ "$url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
-		owner="${BASH_REMATCH[1]}"
-		repo="${BASH_REMATCH[2]%.git}"
-		printf 'https://github.com/%s/%s/archive/HEAD.tar.gz' "$owner" "$repo"
-	fi
-}
-
-github_archive_cache_path() {
-	local url="$1"
-	local owner repo safe_repo
-
-	if [[ "$url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
-		owner="${BASH_REMATCH[1]}"
-		repo="${BASH_REMATCH[2]%.git}"
-		safe_repo="${repo//[^A-Za-z0-9._-]/_}"
-		printf '%s/config/%s-%s-HEAD.tar.gz' "$PACKAGES_PATH" "$owner" "$safe_repo"
-	fi
-}
-
-fetch_github_repo_snapshot() {
-	local url="$1"
-	local dest="$2"
-	local archive_url archive_path
-
-	archive_url=$(github_archive_url "$url")
-	archive_path=$(github_archive_cache_path "$url")
-	if [[ -z "$archive_url" || -z "$archive_path" ]]; then
-		log "No archive fallback is available for $url." "ERROR"
-		return 1
-	fi
-
-	log "Falling back to GitHub archive snapshot for $url" "WARN"
-	if ! download_package "$archive_url" "$archive_path"; then
-		return 1
-	fi
-	if ! extract_package "$archive_path" "$dest" 1; then
-		return 1
-	fi
-	log "Repository snapshot prepared: $dest" "SUCCESS"
-}
-
-ensure_module_command() {
-	if ! command -v module &>/dev/null; then
-		log "Environment Modules command 'module' is not available. Source your modules init script first." "ERROR"
-		return 1
-	fi
-}
-
-# Helper function to get the URL for a specific software version
-_get_software_url() {
-	local appname="$1"
-	local version="$2"
-	local url_template="${SOFTWARE_URLS[$appname]}"
-	# Replace the {VERSION} placeholder with the actual version number
-	echo "${url_template//\{VERSION\}/$version}"
-}
-
-download_package() {
-	local url="$1"
-	local dest="$2"
-	if [[ -z "$url" || -z "$dest" ]]; then
-		log "download_package requires both URL and destination." "ERROR"
-		return 1
-	fi
-	# Check if package already exists and is reasonably sized
-	if [[ -f "$dest" && $(file_size "$dest") -gt 100 ]]; then
-		log "Package exists: $(basename "$dest")" "INFO"
-		return 0
-	fi
-	log "Downloading $(basename "$dest") from $url" "INFO"
-	mkdir -p "$(dirname "$dest")"
-	local tmp_dest
-	tmp_dest=$(mktemp "$(dirname "$dest")/.tmp.$(basename "$dest").XXXXXX")
-	local log_file
-	log_file=$(mktemp)
-	for ((i = 1; i <= MAX_RETRIES; i++)); do
-		: >"$log_file"
-		if wget --tries=1 --timeout="$DOWNLOAD_TIMEOUT" -o "$log_file" -O "$tmp_dest" "$url" && [[ $(file_size "$tmp_dest") -gt 100 ]]; then
-			mv -f "$tmp_dest" "$dest"
-			rm -f "$log_file"
-			log "Download successful." "SUCCESS"
-			return 0
-		fi
-		log "Download attempt $i failed. Retrying..." "WARN"
-	done
-	log "Failed to download $url. Last attempt log:" "ERROR"
-	cat "$log_file" >&2
-	rm -f "$log_file" "$tmp_dest"
-	return 1
-}
-
-extract_package() {
-	local pkg="$1"
-	local dest="$2"
-	local strip="${3:-1}"
-	if [[ ! -f "$pkg" ]]; then
-		log "Package not found: $pkg" "ERROR"
-		return 1
-	fi
-	log "Extracting $(basename "$pkg") to $(basename "$dest")" "INFO"
-	mkdir -p "$(dirname "$dest")"
-	local tmp_dest
-	tmp_dest=$(mktemp -d "$(dirname "$dest")/.extract.$(basename "$dest").XXXXXX")
-	case "$pkg" in
-	*.tar.gz | *.tgz) tar -xzf "$pkg" -C "$tmp_dest" --strip-components="$strip" ;;
-	*.tar.xz) tar -xJf "$pkg" -C "$tmp_dest" --strip-components="$strip" ;;
-	*.tar.bz2) tar -xjf "$pkg" -C "$tmp_dest" --strip-components="$strip" ;;
-	*.zip) unzip -q "$pkg" -d "$tmp_dest" ;;
-	*)
-		log "Unsupported format: $pkg" "ERROR"
-		safe_rm_rf "$tmp_dest"
-		return 1
-		;;
-	esac
-	if [[ -z "$(ls -A "$tmp_dest")" ]]; then
-		log "Extraction failed: destination is empty." "ERROR"
-		safe_rm_rf "$tmp_dest"
-		return 1
-	fi
-	safe_rm_rf "$dest"
-	mkdir -p "$(dirname "$dest")"
-	mv "$tmp_dest" "$dest"
-	log "Extraction successful." "SUCCESS"
-}
-
-archive_is_readable() {
-	local pkg="$1"
-
-	case "$pkg" in
-	*.tar.gz | *.tgz) tar -tzf "$pkg" >/dev/null ;;
-	*.tar.xz) tar -tJf "$pkg" >/dev/null ;;
-	*.tar.bz2) tar -tjf "$pkg" >/dev/null ;;
-	*.zip) unzip -tq "$pkg" >/dev/null ;;
+_omw_cli_requires_sys_deps() {
+	case "$1" in
+	help | init | status | update-check) return 1 ;;
 	*) return 0 ;;
 	esac
 }
 
-# Helper function to parse GCC's download_prerequisites script
-_get_gcc_prereq_pkgs() {
-	local extracted_gcc_path="$1"
-	local prereq_script="$extracted_gcc_path/contrib/download_prerequisites"
+_omw_cli_require_target() {
+	local command="$1"
+	local target="$2"
+	local hint="$3"
 
-	if [[ ! -f "$prereq_script" ]]; then
-		log "download_prerequisites script not found in $extracted_gcc_path" "ERROR"
-		return 1
-	fi
-	# Use an array to store results, which handles potential future changes better
-	local prereqs=(
-		"$(grep -oP 'gmp-.*tar\.bz2' "$prereq_script" | head -1 || true)"
-		"$(grep -oP 'mpfr-.*tar\.bz2' "$prereq_script" | head -1 || true)"
-		"$(grep -oP 'mpc-.*tar\.gz' "$prereq_script" | head -1 || true)"
-		"$(grep -oP 'isl-.*tar\.bz2' "$prereq_script" | head -1 || true)"
-	)
-	# Print non-empty package names
-	for pkg in "${prereqs[@]}"; do
-		[[ -n "$pkg" ]] && echo "$pkg"
-	done
+	[[ -n "$target" ]] && return 0
+	omw_log "$command requires a target. $hint" "ERROR"
+	exit 1
 }
 
-# Prefetch GCC prerequisites for all defined versions
-prefetch_gcc_prereqs() {
-	local versions_str="${SOFTWARE_VERSIONS[gcc]}"
-	[[ -z "$versions_str" ]] && return 0 # Skip if GCC is not defined
-
-	log "Prefetching GCC prerequisites for all defined versions..." "INFO"
-
-	for version in $versions_str; do
-		local url
-		url=$(_get_software_url "gcc" "$version")
-		local gcc_pkg
-		gcc_pkg="$PACKAGES_PATH/software/$(basename "$url")"
-		local tmp_dir="$BUILDS_PATH/.prefetch-gcc-$version"
-
-		# Ensure GCC main package is downloaded
-		if ! download_package "$url" "$gcc_pkg"; then
-			return 1
-		fi
-
-		# Extract just to parse the prerequisites script
-		safe_rm_rf "$tmp_dir"
-		if ! extract_package "$gcc_pkg" "$tmp_dir" 1; then
-			safe_rm_rf "$tmp_dir"
-			return 1
-		fi
-
-		local prereq_pkgs
-		mapfile -t prereq_pkgs < <(_get_gcc_prereq_pkgs "$tmp_dir")
-
-		for pkg in "${prereq_pkgs[@]}"; do
-			local dest="$PACKAGES_PATH/software/$pkg"
-			if ! download_package "${GCC_PREREQ_BASE_URL}${pkg}" "$dest"; then
-				safe_rm_rf "$tmp_dir"
-				return 1
-			fi
-		done
-
-		safe_rm_rf "$tmp_dir"
-	done
-	log "All GCC prerequisites prefetched." "SUCCESS"
-}
-
-# Generate SHA256 checksums for all packages
-write_checksums() {
-	local sums_file="$PACKAGES_PATH/SHA256SUMS"
-	local tmp_sums
-	tmp_sums=$(mktemp "$PACKAGES_PATH/.SHA256SUMS.XXXXXX")
-	if command -v sha256sum &>/dev/null; then
-		log "Generating checksums..." "INFO"
-		# Exclude existing checksum file to avoid recursion
-		if ! find "$PACKAGES_PATH" -type f ! -name "SHA256SUMS" ! -name ".SHA256SUMS.*" -print0 | sort -z | xargs -0 sha256sum >"$tmp_sums"; then
-			rm -f "$tmp_sums"
-			log "Failed to generate checksums." "ERROR"
-			return 1
-		fi
-		mv "$tmp_sums" "$sums_file"
-		log "Checksums written to $sums_file" "SUCCESS"
-	else
-		rm -f "$tmp_sums"
-		log "sha256sum not available. Skipping checksum generation." "WARN"
-	fi
-}
-
-# Verify offline completeness for all defined software versions
-verify_offline() {
-	log "--- Verifying offline completeness ---" "INFO"
-	local missing=()
-	local corrupt=()
-
-	verify_package() {
-		local path="$1"
-		if [[ ! -f "$path" ]]; then
-			missing+=("$path")
-			return 0
-		fi
-		if ! archive_is_readable "$path"; then
-			corrupt+=("$path")
-		fi
-	}
-
-	# 1) Source and precompiled packages
+_omw_cli_run_build_all() {
+	local sw version versions_str count=0
 	for sw in "${SOFTWARE_LIST[@]}"; do
-		local versions_str="${SOFTWARE_VERSIONS[$sw]}"
+		versions_str="${SOFTWARE_VERSIONS[$sw]}"
 		[[ -z "$versions_str" ]] && continue
 		for version in $versions_str; do
-			local url
-			url=$(_get_software_url "$sw" "$version")
-			[[ -z "$url" ]] && continue
-			local p
-			p="$PACKAGES_PATH/software/$(basename "$url")"
-			verify_package "$p"
+			((++count))
+			omw_log "Build target $count: $sw@$version" "INFO"
+			omw_ensure_module_command || exit 1
+			module purge || exit 1
+			omw_build_software "$sw@$version" "$OMW_FORCE" "$OMW_REFRESH" || exit 1
 		done
 	done
-
-	for app in "${APP_LIST[@]}"; do
-		local url="${APP_URLS[$app]}"
-		[[ -z "$url" ]] && continue
-		local p
-		p="$PACKAGES_PATH/apps/$(basename "$url")"
-		verify_package "$p"
-
-		local source_url="${APP_SOURCE_URLS[$app]:-}"
-		[[ -z "$source_url" ]] && continue
-		local source_p
-		source_p="$PACKAGES_PATH/apps/$(basename "$source_url")"
-		verify_package "$source_p"
-	done
-
-	# 2) GCC prerequisites (if GCC is defined in config) for all versions
-	local gcc_versions_str="${SOFTWARE_VERSIONS[gcc]}"
-	if [[ -n "$gcc_versions_str" ]]; then
-		for version in $gcc_versions_str; do
-			local gcc_url
-			gcc_url=$(_get_software_url "gcc" "$version")
-			local gcc_pkg
-			gcc_pkg="$PACKAGES_PATH/software/$(basename "$gcc_url")"
-
-			if [[ -f "$gcc_pkg" ]]; then
-				local tmp_dir="$BUILDS_PATH/.verify-gcc-prereqs-$version"
-				safe_rm_rf "$tmp_dir"
-				if extract_package "$gcc_pkg" "$tmp_dir" 1; then
-					local prereq_pkgs
-					mapfile -t prereq_pkgs < <(_get_gcc_prereq_pkgs "$tmp_dir")
-					safe_rm_rf "$tmp_dir"
-					for pkg in "${prereq_pkgs[@]}"; do
-						local p="$PACKAGES_PATH/software/$pkg"
-						verify_package "$p"
-					done
-				else
-					safe_rm_rf "$tmp_dir"
-					missing+=("$gcc_pkg (could not inspect GCC prerequisites)")
-				fi
-			else
-				missing+=("$gcc_pkg")
-			fi
-		done
-	fi
-
-	# 3) Local RPM packages bundle
-	verify_package "$PACKAGES_PATH/rpms.tar.gz"
-
-	# 4) Config packages required for offline fallback-free shell setup
-	for cfg in tmux zsh; do
-		verify_package "$PACKAGES_PATH/config/$cfg.tar.gz"
-	done
-	if [[ ! -f "$PACKAGES_PATH/config/vim.tar.gz" ]]; then
-		log "Optional Vim config package not found; Vim config will be skipped offline." "WARN"
-	else
-		verify_package "$PACKAGES_PATH/config/vim.tar.gz"
-	fi
-
-	if ((${#missing[@]} > 0)); then
-		log "Missing offline assets:" "ERROR"
-		for m in "${missing[@]}"; do echo "  - $m" >&2; done
-		return 1
-	fi
-	if ((${#corrupt[@]} > 0)); then
-		log "Unreadable or corrupt offline archives:" "ERROR"
-		for c in "${corrupt[@]}"; do echo "  - $c" >&2; done
-		return 1
-	fi
-	log "Offline assets look complete." "SUCCESS"
-}
-
-config_package_path() {
-	local target="$1"
-	printf '%s/config/%s.tar.gz' "$PACKAGES_PATH" "$target"
-}
-
-config_required_path() {
-	local target="$1"
-
-	case "$target" in
-	tmux)
-		printf '%s/tmux/.tmux' "$CONFIG_PATH"
-		;;
-	vim)
-		printf '%s/vim/vim9' "$CONFIG_PATH"
-		;;
-	zsh)
-		printf '%s/zsh/.oh-my-zsh' "$CONFIG_PATH"
-		;;
-	*)
-		printf '%s/%s' "$CONFIG_PATH" "$target"
-		;;
-	esac
-}
-
-config_ready_for_package() {
-	local target="$1"
-	local required_path first_entry
-	required_path=$(config_required_path "$target")
-
-	[[ -d "$required_path" ]] || return 1
-	first_entry=$(find "$required_path" -mindepth 1 -print -quit)
-	[[ -n "$first_entry" ]]
-}
-
-package_config() {
-	local target="$1"
-	local required_path
-	local package_path
-	required_path=$(config_required_path "$target")
-	package_path=$(config_package_path "$target")
-	ensure_valid_cwd
-
-	if [[ -f "$package_path" ]]; then
-		log "Using existing config package for $target: $package_path" "INFO"
-		return 0
-	fi
-
-	if ! config_ready_for_package "$target"; then
-		if [[ "$target" == "vim" ]]; then
-			log "Vim config source and package are missing; skipping optional Vim config package." "WARN"
-			return 0
-		fi
-		log "Config for $target is missing or empty; running configuration flow before packaging: $required_path" "WARN"
-		configure "$target" || return 1
-		if ! config_ready_for_package "$target"; then
-			log "Configuration flow did not prepare expected files: $required_path" "ERROR"
-			return 1
-		fi
-	fi
-
-	mkdir -p "$(dirname "$package_path")"
-	if ! COPYFILE_DISABLE=1 tar --format=ustar --exclude=".git" -czf "$package_path" -C "$CONFIG_PATH" "$target"; then
-		log "Failed to create config package: $package_path" "ERROR"
-		return 1
-	fi
-	log "Config package created: $package_path" "SUCCESS"
-}
-
-package_all_configs() {
-	local cfg
-	for cfg in tmux vim zsh; do
-		package_config "$cfg" || return 1
-	done
-}
-
-restore_config_package() {
-	local target="$1"
-	local required_path="$2"
-	local package_path target_dir backup_dir
-	package_path=$(config_package_path "$target")
-	target_dir="$CONFIG_PATH/$target"
-
-	if [[ ! -f "$package_path" ]]; then
-		return 0
-	fi
-
-	log "Restoring $target config from $package_path" "INFO"
-	mkdir -p "$CONFIG_PATH"
-	if [[ -e "$target_dir" || -L "$target_dir" ]]; then
-		backup_dir=$(backup_path_once "$target_dir" "$target")
-		safe_rm_rf "$target_dir"
-		[[ -n "$backup_dir" ]] && log "Existing $target config was replaced by package; backup: $backup_dir" "INFO"
-	fi
-	if ! tar -xzf "$package_path" -C "$CONFIG_PATH"; then
-		log "Failed to restore $target config package." "ERROR"
-		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
-			safe_rm_rf "$target_dir"
-			cp -a "$backup_dir" "$target_dir"
-			log "Restored previous $target config from $backup_dir" "WARN"
-		fi
-		return 1
-	fi
-	if [[ ! -d "$required_path" ]]; then
-		log "Config package did not restore expected directory: $required_path" "ERROR"
-		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
-			safe_rm_rf "$target_dir"
-			cp -a "$backup_dir" "$target_dir"
-			log "Restored previous $target config from $backup_dir" "WARN"
-		fi
-		return 1
-	fi
-}
-
-###############################################################################
-# Core Build and Install Logic
-###############################################################################
-
-# A generic function to execute the configure, make, make install sequence
-execute_build_steps() {
-	local build_dir="$1"
-	local configure_cmd_template="$2"
-	local prefix="$3"
-	log "Starting build process in $(basename "$build_dir")" "INFO"
-	local log_dir="$build_dir/logs"
-	mkdir -p "$log_dir"
-	pushd "$build_dir" >/dev/null
-
-	log "Build prefix: $prefix" "DEBUG"
-	log "CFLAGS: ${CFLAGS:-}" "DEBUG"
-	log "LDFLAGS: ${LDFLAGS:-}" "DEBUG"
-	log "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH:-}" "DEBUG"
-	log "PKG_CONFIG_PATH: ${PKG_CONFIG_PATH:-}" "DEBUG"
-
-	for step in "configure" "make" "install"; do
-		local cmd
-		local log_file
-		case "$step" in
-		"configure")
-			# Use eval to expand variables like $prefix within the command string template
-			cmd=$(eval echo "\"$configure_cmd_template\"")
-			log_file="$log_dir/configure.log"
-			;;
-		"make")
-			cmd="make -j $BUILD_JOBS"
-			log_file="$log_dir/make.log"
-			;;
-		"install")
-			cmd="make install"
-			log_file="$log_dir/install.log"
-			;;
-		esac
-
-		log "Step: $step... (log: $log_file)" "INFO"
-		log "Executing command: $cmd" "DEBUG"
-		start_spinner
-		if ! bash -c "$cmd" &>"$log_file"; then
-			stop_spinner
-			log "Step '$step' failed. See details below." "ERROR"
-			tail -n 20 "$log_file" >&2
-			popd >/dev/null
-			return 1
-		fi
-		stop_spinner
-		log "Step '$step' completed." "SUCCESS"
-	done
-	popd >/dev/null
-}
-
-# --- Dedicated Build Functions for Each Software ---
-_build_ncurses() {
-	local build_dir="$1"
-	local prefix="$2"
-	# local config_cmd="./configure --prefix=$prefix --with-shared --enable-pc-files --enable-widec"
-	local config_cmd="./configure --prefix=$prefix --with-normal --disable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
-	execute_build_steps "$build_dir" "$config_cmd" "$prefix"
-	config_cmd="./configure --prefix=$prefix --with-normal --enable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
-	execute_build_steps "$build_dir" "$config_cmd" "$prefix"
-}
-
-_build_lua() {
-	local build_dir="$1"
-	local prefix="$2"
-	pushd "$build_dir" >/dev/null
-	# Lua uses a non-standard build process
-	local make_cmd="make linux INSTALL_TOP=$prefix MYCFLAGS=-fPIC"
-	local install_cmd="make install INSTALL_TOP=$prefix"
-	log "Executing command: $make_cmd" "DEBUG"
-	if ! $make_cmd >"$build_dir/make.log" 2>&1; then
-		log "make step failed for lua. Check make.log" "ERROR"
-		popd >/dev/null
-		return 1
-	fi
-	log "Executing command: $install_cmd" "DEBUG"
-	if ! $install_cmd >>"$build_dir/make.log" 2>&1; then
-		log "install step failed for lua. Check make.log" "ERROR"
-		popd >/dev/null
-		return 1
-	fi
-	popd >/dev/null
-}
-
-_build_gcc() {
-	local build_dir="$1"
-	local prefix="$2"
-	pushd "$build_dir" >/dev/null
-
-	log "Preparing GCC prerequisites from local packages..." "INFO"
-	local prereq_pkgs
-	mapfile -t prereq_pkgs < <(_get_gcc_prereq_pkgs "$build_dir")
-	for pkg in "${prereq_pkgs[@]}"; do
-		local pkg_path="$PACKAGES_PATH/software/$pkg"
-		if [[ ! -f "$pkg_path" ]]; then
-			log "Prerequisite package '$pkg' not found. Please run '--pack' or prefetch." "ERROR"
-			popd >/dev/null
-			return 1
-		fi
-		# The GCC build expects the extracted source directory, not a symlink
-		local prereq_name
-		prereq_name="${pkg%%.tar.*}"
-		extract_package "$pkg_path" "$build_dir/$prereq_name" 1
-	done
-
-	popd >/dev/null
-	local config_cmd="./configure --prefix=$prefix --disable-multilib --enable-languages=c,c++,fortran"
-	execute_build_steps "$build_dir" "$config_cmd" "$prefix"
-}
-
-_build_vim() {
-	local build_dir="$1"
-	local prefix="$2"
-	local _ version # Get version from prefix
-	version=$(basename "$prefix")
-	version=${version#vim-}
-	# Dynamically find the correct Lua version based on vim's dependency
-	local lua_dep
-	lua_dep=$(echo "${SOFTWARE_DEPS["vim@$version"]}" | grep -o 'lua@[^ ]*' | head -n 1)
-	local lua_name lua_version
-	lua_name=${lua_dep%@*}
-	lua_version=${lua_dep#*@}
-	local py_cfg
-	py_cfg=$(python3-config --configdir 2>/dev/null || echo "") # Fails gracefully
-	if [[ -z "$py_cfg" ]]; then
-		log "python3-config not found. Building vim without python3 support." "WARN"
-	fi
-	local config_cmd="./configure --prefix=$prefix --with-features=huge --enable-multibyte --enable-perlinterp --with-xsubpp=${SOFTWARE_INSTALL_PATH}/local/local-${SOFTWARE_VERSIONS[local]}/usr/share/perl5/vendor_perl/ExtUtils/xsubpp --enable-luainterp=yes --with-lua-prefix=${SOFTWARE_INSTALL_PATH}/${lua_name}/${lua_name}-${lua_version} --enable-python3interp=yes --with-python3-config-dir=$py_cfg --enable-gui=gtk3 --with-tlib=ncursesw --enable-cscope --enable-fontset --with-compiledby=OMW LDFLAGS=-Wl,-export-dynamic"
-	execute_build_steps "$build_dir" "$config_cmd" "$prefix"
-}
-
-_build_ctags() {
-	local build_dir="$1"
-	local prefix="$2"
-	pushd "$build_dir" >/dev/null
-	./autogen.sh >"$build_dir/autogen.log" 2>&1
-	popd >/dev/null
-	local config_cmd="./configure --prefix=$prefix"
-	execute_build_steps "$build_dir" "$config_cmd" "$prefix"
-}
-
-_build_node() {
-	local build_dir="$1"
-	local prefix="$2"
-
-	if [[ ! -x "$build_dir/bin/node" ]]; then
-		log "Node binary not found or not executable: $build_dir/bin/node" "ERROR"
-		return 1
-	fi
-
-	mkdir -p "$prefix"
-	cp -a "$build_dir"/. "$prefix"/
-	mkdir -p "$prefix/etc" "$prefix/lib/node_modules"
-	printf 'prefix=%s\n' "$prefix" >"$prefix/etc/npmrc"
-	log "Installed Node binary distribution to $prefix." "SUCCESS"
-	log "Set Node package prefix to $prefix." "INFO"
-}
-
-# Default build function for software that follows the standard ./configure pattern
-_build_default() {
-	local appname="$1"
-	local build_dir="$2"
-	local prefix="$3"
-	local config_cmd_template="${SOFTWARE_CONFIG_CMDS[$appname]}"
-	execute_build_steps "$build_dir" "$config_cmd_template" "$prefix"
-}
-
-ensure_python_bin_symlink() {
-	local prefix="$1"
-	local version="$2"
-	local bin_dir="$prefix/bin"
-	local python_bin="$bin_dir/python"
-	local candidate
-	local minor_version="${version%.*}"
-
-	if [[ -x "$python_bin" ]]; then
-		log "Python executable already exists: $python_bin" "DEBUG"
-		return 0
-	fi
-	if [[ -e "$python_bin" || -L "$python_bin" ]]; then
-		log "Python path exists but is not executable: $python_bin" "ERROR"
-		return 1
-	fi
-
-	for candidate in "$bin_dir/python3" "$bin_dir/python$minor_version"; do
-		if [[ -x "$candidate" ]]; then
-			ln -s "$(basename "$candidate")" "$python_bin"
-			log "Created Python compatibility symlink: $python_bin -> $(basename "$candidate")" "SUCCESS"
-			return 0
-		fi
-	done
-
-	log "No python executable candidate found under $bin_dir." "ERROR"
-	return 1
-}
-
-# Helper function to parse 'name@version' string
-_parse_target() {
-	local target_str="$1"
-	local appname="${target_str%@*}"
-	local version="${target_str#*@}"
-	# If no version is specified, it's just the appname
-	if [[ "$appname" == "$version" ]]; then
-		version=""
-	fi
-	# Return as a string to be read by the caller
-	echo "$appname $version"
-}
-
-# Main dispatcher for building software, now handles versioning
-build_software() {
-	local target_str="$1" # e.g., "python@3.11.12" or "local"
-	local force="${2:-false}"
-	local refresh="${3:-false}"
-
-	local appname version
-	read -r appname version < <(_parse_target "$target_str")
-
-	# Special handling for 'local' target which has no version
-	if [[ "$appname" == "local" ]]; then
-		# local version uses the key from the config file.
-		build_local "$force" "$refresh" "${SOFTWARE_VERSIONS[local]}"
-		return $?
-	fi
-	if [[ -z "${SOFTWARE_VERSIONS[$appname]:-}" ]]; then
-		log "No versions defined for '$appname' in software.conf." "ERROR"
-		return 1
-	fi
-	if [[ -z "$version" ]]; then
-		log "No version specified for '$appname'." "ERROR"
-		return 1
-	fi
-	if ! contains_word "$version" "${SOFTWARE_VERSIONS[$appname]}"; then
-		log "Version '$version' is not defined for '$appname' in software.conf." "ERROR"
-		return 1
-	fi
-
-	log "--- Building $appname $version ---" "INFO"
-
-	if [[ "$refresh" == "true" ]]; then
-		log "Refreshing modulefile for $appname@$version." "INFO"
-		if ! write_modulefile "$appname" "$version"; then
-			return 1
-		fi
-		log "$appname@$version modulefile refreshed." "SUCCESS"
-		return 0
-	fi
-
-	# Dependency resolution now respects specific versions
-	local deps="${SOFTWARE_DEPS["$appname@$version"]}"
-	if [[ -n "$deps" ]]; then
-		log "Processing dependencies for $appname@$version: $deps" "DEBUG"
-		local dep_target # e.g., "python@3.11.12"
-		for dep_target in $deps; do
-			local dep_name dep_version
-			read -r dep_name dep_version < <(_parse_target "$dep_target")
-			# Recursively call build_software with the versioned dependency
-			if ! build_software "$dep_target"; then
-				return 1
-			fi
-			log "Loading module for dependency: $dep_name/$dep_name-${dep_version}" "INFO"
-			ensure_module_command
-			if ! module load "$dep_name/$dep_name-${dep_version}"; then
-				return 1
-			fi
-		done
-	fi
-
-	local prefix="$SOFTWARE_INSTALL_PATH/$appname/$appname-$version"
-	if [[ -d "$prefix" && "$force" == "false" ]]; then
-		if ! write_modulefile "$appname" "$version"; then
-			return 1
-		fi
-		log "$appname@$version already installed. Skipping." "INFO"
-		return 0
-	fi
-
-	local backup_dir=""
-	if [[ "$force" == "true" && -d "$prefix" ]]; then
-		backup_dir="${prefix}-backup-$(date +%Y%m%d%H%M%S)"
-		log "Force build: backing up existing installation to $backup_dir" "WARN"
-		mv "$prefix" "$backup_dir"
-	fi
-
-	local build_dir="$BUILDS_PATH/$appname-$version"
-	safe_rm_rf "$build_dir"
-
-	local url
-	url=$(_get_software_url "$appname" "$version")
-	if [[ -z "$url" ]]; then
-		log "No URL template defined for $appname in configuration. Cannot proceed." "ERROR"
-		return 1
-	fi
-
-	local pkg_path
-	pkg_path="$PACKAGES_PATH/software/$(basename "$url")"
-	if ! download_package "$url" "$pkg_path" || ! extract_package "$pkg_path" "$build_dir"; then
-		safe_rm_rf "$build_dir"
-		if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
-			log "Restoring previous installation for $appname@$version." "WARN"
-			mv "$backup_dir" "$prefix"
-		fi
-		return 1
-	fi
-
-	# Dynamically call the appropriate build function
-	local build_func="_build_$appname"
-	if declare -F "$build_func" >/dev/null; then
-		log "Using dedicated build function for $appname." "DEBUG"
-		if ! "$build_func" "$build_dir" "$prefix"; then
-			safe_rm_rf "$prefix"
-			if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
-				log "Restoring previous installation for $appname@$version." "WARN"
-				mv "$backup_dir" "$prefix"
-			fi
-			return 1
-		fi
-	else
-		log "Using default build function for $appname." "DEBUG"
-		if ! _build_default "$appname" "$build_dir" "$prefix"; then
-			safe_rm_rf "$prefix"
-			if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
-				log "Restoring previous installation for $appname@$version." "WARN"
-				mv "$backup_dir" "$prefix"
-			fi
-			return 1
-		fi
-	fi
-
-	if [[ "$appname" == "python" ]] && ! ensure_python_bin_symlink "$prefix" "$version"; then
-		safe_rm_rf "$prefix"
-		if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
-			log "Restoring previous installation for $appname@$version." "WARN"
-			mv "$backup_dir" "$prefix"
-		fi
-		return 1
-	fi
-
-	if ! write_modulefile "$appname" "$version"; then
-		safe_rm_rf "$prefix"
-		if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
-			log "Restoring previous installation for $appname@$version." "WARN"
-			mv "$backup_dir" "$prefix"
-		fi
-		return 1
-	fi
-	log "$appname@$version build process completed." "SUCCESS"
-}
-
-build_local() {
-	local force="${1:-false}"
-	local refresh="${2:-false}"
-	local version="${3}" # Version is now passed in
-	local prefix="$SOFTWARE_INSTALL_PATH/local/local-$version"
-	local rpm_dir="$BUILDS_PATH/local-rpms"
-	local pkg_path="$PACKAGES_PATH/rpms.tar.gz"
-	log "--- Handling local system dependencies ---" "INFO"
-
-	if [[ "$refresh" == "true" ]]; then
-		log "Refreshing modulefile for local." "INFO"
-		if ! write_modulefile "local" "$version"; then
-			return 1
-		fi
-		log "local modulefile refreshed." "SUCCESS"
-		return 0
-	fi
-	if [[ -d "$prefix" && "$force" == "false" ]]; then
-		log "Local dependencies installed. Skipping." "INFO"
-		return 0
-	fi
-	local backup_dir=""
-	if [[ "$force" == "true" && -d "$prefix" ]]; then
-		backup_dir="${prefix}-backup-$(date +%Y%m%d%H%M%S)"
-		log "Force build: backing up local dependencies to $backup_dir" "WARN"
-		mv "$prefix" "$backup_dir"
-	fi
-
-	mkdir -p "$rpm_dir"
-	if [[ ! -f "$pkg_path" ]]; then
-		log "Downloading system RPMs..."
-		local rpms_to_download=(
-			"gtk3" "gtk3-devel"
-			"libX11" "libX11-devel" "libXt" "libXt-devel" "libSM" "libSM-devel"
-			"libICE" "libICE-devel" "libXpm" "libXpm-devel" "xorg-x11-proto-devel"
-			"libXau" "libXau-devel" "libXft" "libXft-devel" "libxcb" "libxcb-devel"
-			"libXcomposite" "libXcomposite-devel" "libXcursor" "libXcursor-devel"
-			"libXdamage" "libXdamage-devel" "libXext" "libXext-devel"
-			"libXfixes" "libXfixes-devel" "libXi" "libXi-devel"
-			"libXinerama" "libXinerama-devel" "libXrandr" "libXrandr-devel"
-			"libXrender" "libXrender-devel" "libXtst" "libXxf86vm" "libXxf86vm-devel"
-			"libglvnd" "libglvnd-devel" "libglvnd-core-devel" "libglvnd-egl"
-			"libglvnd-gles" "libglvnd-glx" "libglvnd-opengl" "mesa-libEGL" "mesa-libGL"
-			"mesa-libGLES" "mesa-libgbm" "mesa-libglapi"
-			"libdrm" "libdrm-devel" "libepoxy" "libepoxy-devel"
-			"perl-ExtUtils-Embed" "perl-ExtUtils-ParseXS" "perl-ExtUtils-MakeMaker" "help2man" "freetype" "freetype-devel"
-			"zlib" "zlib-devel" "bzip2-libs" "bzip2-devel" "libffi" "libffi-devel"
-			"sqlite" "sqlite-devel" "tkinter" "tcl" "tcl-devel" "tk" "tk-devel"
-			"readline" "readline-devel" "ncurses-libs" "ncurses-devel"
-			"gdbm" "gdbm-devel" "libdb" "libdb-devel" "dbus-libs" "dbus-devel"
-			"pcre" "pcre-devel"
-			"python3-tkinter" "xz-devel" "lzma" "autoconf" "automake"
-			"binutils" "bison" "flex" "gettext" "libtool" "patch"
-			"pkgconfig"
-		)
-		start_spinner
-		if ! yumdownloader --downloadonly --destdir="$rpm_dir" --resolve "${rpms_to_download[@]}" >/dev/null; then
-			stop_spinner
-			log "RPM dependency download failed." "ERROR"
-			[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
-			return 1
-		fi
-		stop_spinner
-		find "$rpm_dir" -name "*.i686.rpm" -delete
-	else
-		log "Using pre-packaged RPMs from $pkg_path" "INFO"
-		if ! extract_package "$pkg_path" "$rpm_dir" 0; then
-			[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
-			return 1
-		fi
-	fi
-
-	local rpm_count
-	rpm_count=$(find "$rpm_dir" -maxdepth 1 -name "*.rpm" | wc -l)
-	if ((rpm_count == 0)); then
-		log "No RPM files found in $rpm_dir." "ERROR"
-		[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
-		return 1
-	fi
-
-	if ! extract_rpms_to_prefix "$rpm_dir" "$prefix"; then
-		safe_rm_rf "$prefix"
-		[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
-		return 1
-	fi
-
-	log "Writing local RPM bundle to $pkg_path." "INFO"
-	if ! tar -czf "$pkg_path" -C "$rpm_dir" .; then
-		safe_rm_rf "$prefix"
-		[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
-		log "Failed to write local RPM bundle." "ERROR"
-		return 1
-	fi
-	repair_broken_lib64_links "$prefix/usr/lib64" "$prefix"
-
-	# Adjust pkg-config files after extraction.
-	if ! find "$prefix" -name "*.pc" -exec sed -i \
-		-e "s|=/usr|=$prefix/usr|g" \
-		-e "s|-I/usr|-I$prefix/usr|g" \
-		-e "s|-L/usr|-L$prefix/usr|g" \
-		{} +; then
-		safe_rm_rf "$prefix"
-		[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
-		log "Failed to adjust pkg-config files for local dependencies." "ERROR"
-		return 1
-	fi
-
-	if ! write_modulefile "local" "$version"; then
-		safe_rm_rf "$prefix"
-		[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
-		return 1
-	fi
-	local modulefile_path="$MODULEFILES_PATH/local/local-$version"
-	if ! sed -i "s|set prefix.*|set prefix  \$base/local/local-$version/usr|g" "$modulefile_path" ||
-		! sed -i "s|\$prefix/lib|\$prefix/lib64|g" "$modulefile_path" ||
-		! cat >>"$modulefile_path" <<-EOF; then
-			prepend-path PKG_CONFIG_PATH    \$prefix/share/pkgconfig
-			prepend-path PERL5LIB           \$prefix/share/perl5
-			prepend-path PERL5LIB           \$prefix/share/perl5/vendor_perl
-		EOF
-		safe_rm_rf "$prefix"
-		[[ -n "$backup_dir" && -d "$backup_dir" ]] && mv "$backup_dir" "$prefix"
-		log "Failed to finalize local modulefile." "ERROR"
-		return 1
-	fi
-}
-
-# Generates a modulefile with version-specific dependencies
-write_modulefile() {
-	local appname="$1"
-	local version="$2"
-	local modulefile_path="$MODULEFILES_PATH/$appname/$appname-$version"
-	log "Generating modulefile for $appname@$version" "INFO"
-	mkdir -p "$(dirname "$modulefile_path")"
-	cat >"$modulefile_path" <<-EOF
-		#%Module1.0
-		proc ModulesHelp { } { puts stderr "Loads $appname version $version" }
-		module-whatis "Software: $appname $version"
-		set base    \$env(OMW_HOME)/tools/software
-		set prefix  \$base/$appname/$appname-$version
-	EOF
-	# Load dependencies before this module prepends its own paths.
-	local deps="${SOFTWARE_DEPS["$appname@$version"]:-}"
-	if [[ -n "$deps" ]]; then
-		echo "" >>"$modulefile_path"
-		local dep_target
-		for dep_target in $deps; do
-			local dep_name dep_version
-			read -r dep_name dep_version < <(_parse_target "$dep_target")
-			echo "module load $dep_name/$dep_name-${dep_version}" >>"$modulefile_path"
-		done
-		echo "" >>"$modulefile_path"
-	fi
-	cat >>"$modulefile_path" <<-EOF
-		prepend-path PATH              \$prefix/bin
-		prepend-path LIBRARY_PATH      \$prefix/lib
-		prepend-path LD_LIBRARY_PATH   \$prefix/lib
-		prepend-path PKG_CONFIG_PATH   \$prefix/lib/pkgconfig
-		prepend-path MANPATH           \$prefix/share/man
-		prepend-path C_INCLUDE_PATH    \$prefix/include
-		prepend-path CPLUS_INCLUDE_PATH \$prefix/include
-	EOF
-	if [[ "$appname" == "node" ]]; then
-		cat >>"$modulefile_path" <<-EOF
-			setenv NPM_CONFIG_PREFIX     \$prefix
-			setenv npm_config_prefix     \$prefix
-		EOF
-	fi
-	# Add custom compiler flags if defined in software.conf
-	local cflags="${SOFTWARE_CFLAGS[$appname]:-}"
-	local ldflags="${SOFTWARE_LDFLAGS[$appname]:-}"
-	if [[ -n "$cflags" || -n "$ldflags" ]]; then
-		cat >>"$modulefile_path" <<-EOF
-
-			# Custom compiler flags
-			if {[info exists env(CFLAGS)]} {
-			    setenv CFLAGS "\$env(CFLAGS) ${cflags}"
-			} else {
-			    setenv CFLAGS "${cflags}"
-			}
-			if {[info exists env(LDFLAGS)]} {
-			    setenv LDFLAGS "\$env(LDFLAGS) ${ldflags}"
-			} else {
-			    setenv LDFLAGS "${ldflags}"
-			}
-		EOF
-	fi
-}
-
-_install_autojump() {
-	local appname="$1"
-	local install_dir="$2"
-	local exec_path
-	exec_path=$(find "$install_dir" -type f -name "install.py" | head -n 1)
-	[[ -z "$exec_path" ]] && {
-		log "autojump install.py not found in $install_dir." "ERROR"
-		return 1
-	}
-	if [[ ! -f "$exec_path" ]]; then
-		log "autojump install.py not found in $install_dir." "ERROR"
-		return 1
-	fi
-	local backup_dir=""
-	if [[ -e "$HOME/.autojump" ]]; then
-		backup_dir="$HOME/.autojump-backup-$(date +%Y%m%d%H%M%S)"
-		mv "$HOME/.autojump" "$backup_dir"
-	fi
-	# Run the install script
-	local dirname
-	dirname=$(dirname "$exec_path")
-	log "Running autojump installer in $dirname" "INFO"
-	pushd "$dirname" >/dev/null
-	local installer_shell="${SHELL:-/bin/bash}"
-	case "$(basename "$installer_shell")" in
-	bash | zsh | fish | tcsh) ;;
-	*)
-		log "Unsupported or empty SHELL for autojump installer: ${SHELL:-unset}; using /bin/bash." "WARN"
-		installer_shell="/bin/bash"
-		;;
-	esac
-	if ! SHELL="$installer_shell" "./install.py" >/dev/null; then
-		popd >/dev/null
-		log "autojump installation failed." "ERROR"
-		safe_rm_rf "$HOME/.autojump"
-		[[ -n "$backup_dir" && -e "$backup_dir" ]] && mv "$backup_dir" "$HOME/.autojump"
-		return 1
-	fi
-	popd >/dev/null
-	[[ -n "$backup_dir" && -e "$backup_dir" ]] && safe_rm_rf "$backup_dir"
-	# add source autojump to shell config
-	local zshrc="$HOME/.zshrc_custom"
-	[[ ! -f "$zshrc" ]] && zshrc="$HOME/.zshrc"
-	if ! grep -q "autojump.sh" "$zshrc"; then
-		printf '\n# Autojump\n[ -f "%s/.autojump/etc/profile.d/autojump.sh" ] && source "%s/.autojump/etc/profile.d/autojump.sh"\n' "$HOME" "$HOME" >>"$zshrc"
-		log "Added autojump source line to $zshrc" "INFO"
-	fi
-	log "App '$appname' installed successfully." "SUCCESS"
-	return 0
-}
-
-_install_default() {
-	local appname="$1"
-	local install_dir="$2"
-	local exec_path
-	exec_path=$(find "$install_dir" -type f -name "$appname" | head -n 1)
-	if [[ -z "$exec_path" ]]; then
-		log "Executable '$appname' not found in $install_dir." "ERROR"
-		return 1
-	fi
-	[[ ! -x "$exec_path" ]] && {
-		log "Making '$appname' executable." "WARN"
-		chmod +x "$exec_path"
-	}
-	ln -sf "$exec_path" "$SCRIPTS_BIN_PATH/$appname"
-	log "App '$appname' installed successfully." "SUCCESS"
-	return 0
-}
-
-app_bin_dir_install_status() {
-	local appname="$1"
-	local install_dir="$2"
-	local bin_dirs="${APP_BIN_DIRS[$appname]:-}"
-	local exec_name="${APP_EXECUTABLE_NAME[$appname]:-}"
-	local entry link_name total=0 linked=0
-
-	if [[ ! -d "$install_dir" ]]; then
-		if [[ -n "$exec_name" && -L "$SCRIPTS_BIN_PATH/$exec_name" ]]; then
-			printf 'partial'
-		else
-			printf 'available'
-		fi
-		return 0
-	fi
-
-	while IFS= read -r -d $'\0' entry; do
-		link_name="$SCRIPTS_BIN_PATH/$(basename "$entry")"
-		((++total))
-		if [[ -L "$link_name" && "$(readlink "$link_name")" == "$entry" ]]; then
-			((++linked))
-		fi
-	done < <(find_app_bin_dir_entries "$install_dir" "$bin_dirs")
-
-	if ((total > 0 && linked == total)); then
-		printf 'installed'
-	elif ((total > 0 || linked > 0)); then
-		printf 'partial'
-	else
-		printf 'available'
-	fi
-}
-
-find_app_bin_dir_entries() {
-	local install_dir="$1"
-	local bin_dirs="$2"
-	local rel_dir dir found_dir
-
-	for rel_dir in $bin_dirs; do
-		dir="$install_dir/$rel_dir"
-		if [[ -d "$dir" ]]; then
-			find "$dir" -mindepth 1 -maxdepth 1 \( -type f -o -type l \) -print0
-			continue
-		fi
-
-		while IFS= read -r -d $'\0' found_dir; do
-			find "$found_dir" -mindepth 1 -maxdepth 1 \( -type f -o -type l \) -print0
-		done < <(find "$install_dir" -mindepth 2 -type d -path "*/$rel_dir" -print0)
-	done
-}
-
-unlink_app_bin_dir_links() {
-	local install_dir="$1"
-	local link target
-
-	[[ -d "$SCRIPTS_BIN_PATH" ]] || return 0
-	while IFS= read -r -d $'\0' link; do
-		target=$(readlink "$link")
-		[[ "$target" == "$install_dir"/* ]] && rm -f "$link"
-	done < <(find "$SCRIPTS_BIN_PATH" -mindepth 1 -maxdepth 1 -type l -print0)
-}
-
-link_app_bin_dirs() {
-	local appname="$1"
-	local install_dir="$2"
-	local bin_dirs="${APP_BIN_DIRS[$appname]:-}"
-	local entry link_name count=0
-
-	while IFS= read -r -d $'\0' entry; do
-		((++count))
-	done < <(find_app_bin_dir_entries "$install_dir" "$bin_dirs")
-
 	if ((count == 0)); then
-		log "No files found in configured bin dirs for '$appname': $bin_dirs" "ERROR"
-		return 1
+		omw_log "No source build targets are defined in packages.sh." "ERROR"
+		exit 1
 	fi
-
-	unlink_app_bin_dir_links "$install_dir"
-	count=0
-	while IFS= read -r -d $'\0' entry; do
-		if [[ -f "$entry" && ! -x "$entry" ]]; then
-			log "Making '$(basename "$entry")' executable." "WARN"
-			chmod +x "$entry"
-		fi
-		link_name="$SCRIPTS_BIN_PATH/$(basename "$entry")"
-		ln -sf "$entry" "$link_name"
-		((++count))
-	done < <(find_app_bin_dir_entries "$install_dir" "$bin_dirs")
-
-	log "Linked $count '$appname' bin entr$(if ((count == 1)); then printf 'y'; else printf 'ies'; fi) into $SCRIPTS_BIN_PATH." "SUCCESS"
-	return 0
 }
 
-hack_nerd_font_installed() {
-	if command -v fc-match &>/dev/null; then
-		fc-match "Hack Nerd Font" 2>/dev/null | grep -Eiq 'Hack[[:space:]]*Nerd|HackNerd'
-		return $?
-	fi
+_omw_cli_run_all() {
+	local app
 
-	[[ -d "$HOME/.local/share/fonts/OMW/HackNerdFont" || -d "$HOME/.fonts/OMW/HackNerdFont" ]]
+	omw_log "Phase 1/3: build source software (${#SOFTWARE_LIST[@]} package definitions)" "INFO"
+	_omw_cli_run_build_all
+	omw_log "Phase 2/3: apply configs" "INFO"
+	for app in tmux vim zsh; do omw_configure "$app" "$OMW_FORCE" || exit 1; done
+	omw_log "Phase 3/3: install prebuilt apps (${#APP_LIST[@]} app definitions)" "INFO"
+	for app in "${APP_LIST[@]}"; do omw_install_app "$app" "$OMW_FORCE" || exit 1; done
+
 }
 
-_install_hack-nerd-font() {
-	local appname="$1"
-	local install_dir="$2"
-	local font_dir="$HOME/.local/share/fonts/OMW/HackNerdFont"
-	local font_count
-
-	if hack_nerd_font_installed; then
-		log "Hack Nerd Font is already available." "SUCCESS"
-		return 0
-	fi
-
-	if [[ -f /etc/centos-release || -f /etc/redhat-release ]]; then
-		log "CentOS/RHEL family detected; installing Hack Nerd Font for the current user." "INFO"
-	else
-		log "Installing Hack Nerd Font for the current user." "INFO"
-	fi
-
-	font_count=$(find "$install_dir" -type f \( -iname "*.ttf" -o -iname "*.otf" \) | wc -l | tr -d '[:space:]')
-	if [[ "$font_count" == "0" ]]; then
-		log "No font files found in $install_dir." "ERROR"
-		return 1
-	fi
-
-	mkdir -p "$font_dir"
-	find "$install_dir" -type f \( -iname "*.ttf" -o -iname "*.otf" \) -exec cp -f {} "$font_dir/" \;
-	if command -v fc-cache &>/dev/null; then
-		fc-cache -f "$font_dir"
-	else
-		log "fc-cache is not available; font files were copied but font cache was not refreshed." "WARN"
-	fi
-
-	if command -v fc-match &>/dev/null && ! hack_nerd_font_installed; then
-		log "Hack Nerd Font files were installed, but fontconfig did not report the font yet." "ERROR"
-		return 1
-	fi
-
-	log "Hack Nerd Font installed to $font_dir." "SUCCESS"
-	return 0
-}
-
-install_app() {
-	local appname="$1"
-	local force="${2:-false}"
-	local version="${APP_VERSIONS[$appname]}"
-	local url="${APP_URLS[$appname]}"
-	local exec_name="${APP_EXECUTABLE_NAME[$appname]}"
-	if [[ -z "$version" || -z "$url" || -z "$exec_name" ]]; then
-		log "Unknown app or incomplete app definition: $appname" "ERROR"
-		return 1
-	fi
-	local install_dir="$APPS_INSTALL_PATH/$appname-$version"
-	local pkg_path
-	pkg_path="$PACKAGES_PATH/apps/$(basename "$url")"
-	local bin_dirs="${APP_BIN_DIRS[$appname]:-}"
-	local symlink_path="$SCRIPTS_BIN_PATH/$exec_name"
-	local backup_dir=""
-	local old_symlink_target=""
-
-	log "--- Installing App: $appname $version ---" "INFO"
-	if [[ "$exec_name" == "special" && "$force" == "false" && "$(app_install_status "$appname")" == "installed" ]]; then
-		log "$appname already installed. Skipping." "INFO"
-		return 0
-	fi
-	if [[ "$exec_name" != "special" && -z "$bin_dirs" && -L "$symlink_path" && "$force" == "false" ]]; then
-		log "$appname already installed. Skipping." "INFO"
-		return 0
-	fi
-	if [[ "$exec_name" != "special" && -n "$bin_dirs" && "$force" == "false" && "$(app_install_status "$appname")" == "installed" ]]; then
-		log "$appname already installed. Skipping." "INFO"
-		return 0
-	fi
-	if [[ "$force" == "true" ]]; then
-		log "Force reinstall for $appname." "WARN"
-		if [[ -d "$install_dir" ]]; then
-			backup_dir="${install_dir}-backup-$(date +%Y%m%d%H%M%S)"
-			mv "$install_dir" "$backup_dir"
-		fi
-		if [[ "$exec_name" != "special" && -z "$bin_dirs" ]]; then
-			[[ -L "$symlink_path" ]] && old_symlink_target=$(readlink "$symlink_path")
-			rm -f "$symlink_path"
-		fi
-	fi
-	safe_rm_rf "$install_dir"
-
-	mkdir -p "$install_dir"
-	if ! download_package "$url" "$pkg_path" || ! extract_package "$pkg_path" "$install_dir" 0; then
-		safe_rm_rf "$install_dir"
-		if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
-			log "Restoring previous app installation for $appname." "WARN"
-			mv "$backup_dir" "$install_dir"
-		fi
-		[[ -n "$old_symlink_target" ]] && ln -sf "$old_symlink_target" "$symlink_path"
-		return 1
-	fi
-
-	# Dynamically determine the executable name if set to "special"
-	local install_status=0
-	if declare -F "_install_$appname" >/dev/null; then
-		log "Using dedicated install function for $appname." "DEBUG"
-		"_install_$appname" "$appname" "$install_dir" || install_status=$?
-	elif [[ -n "$bin_dirs" ]]; then
-		log "Using bin-dir install function for $appname." "DEBUG"
-		link_app_bin_dirs "$appname" "$install_dir" || install_status=$?
-	else
-		log "Using default install function for $appname." "DEBUG"
-		_install_default "$exec_name" "$install_dir" || install_status=$?
-	fi
-	if ((install_status != 0)); then
-		safe_rm_rf "$install_dir"
-		if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
-			log "Restoring previous app installation for $appname." "WARN"
-			mv "$backup_dir" "$install_dir"
-		fi
-		[[ -n "$old_symlink_target" ]] && ln -sf "$old_symlink_target" "$symlink_path"
-		return "$install_status"
-	fi
-	[[ -n "$backup_dir" && -d "$backup_dir" ]] && safe_rm_rf "$backup_dir"
-	log "$appname installation complete." "SUCCESS"
-}
-
-write_omw_vimrc() {
-	local vimrc="$HOME/.vimrc"
-	local tmp_vimrc
-	tmp_vimrc=$(mktemp)
-
-	cat >"$tmp_vimrc" <<-'EOF'
-		if v:version >= 900
-		    let s:old_dir = expand('~/.vim')
-		    let s:new_dir = expand('$OMW_HOME/config/vim/vim9')
-		    let &runtimepath = substitute(&runtimepath, '\V' . escape(s:old_dir, '\'), '\=s:new_dir', 'g')
-		    let &packpath = substitute(&packpath, '\V' . escape(s:old_dir, '\'), '\=s:new_dir', 'g')
-
-		    let s:vimrc = s:new_dir . '/vimrc'
-		    if filereadable(s:vimrc)
-		        execute 'source ' . fnameescape(s:vimrc)
-		    endif
-		else
-		    if filereadable(expand('~/.vim/vimrc'))
-		        source ~/.vim/vimrc
-		    endif
-		endif
-
-		finish
-	EOF
-
-	if [[ -f "$vimrc" ]] && cmp -s "$tmp_vimrc" "$vimrc"; then
-		rm -f "$tmp_vimrc"
-		log "$vimrc is already configured." "INFO"
-		return 0
-	fi
-
-	[[ -e "$vimrc" || -L "$vimrc" ]] && backup_path_for_config "$vimrc" "vim"
-	mv "$tmp_vimrc" "$vimrc"
-	log "Installed OMW vimrc to $vimrc" "SUCCESS"
-}
-
-###############################################################################
-# Post-Install & Packaging
-###############################################################################
-configure() {
+_omw_cli_run_build() {
 	local target="$1"
-	CONFIG_BACKUP_PATHS=()
+	local appname version versions_str v
 
+	_omw_cli_require_target "build" "$target" "Example: $0 build vim or $0 build python@3.12.12"
+	if [[ "$target" == "all" ]]; then
+		_omw_cli_run_build_all
+		return 0
+	fi
+
+	read -r appname version < <(omw_parse_target "$target")
+	if [[ -z "$version" ]]; then
+		omw_log "No version specified for '$appname'. Building all defined versions." "INFO"
+		versions_str="${SOFTWARE_VERSIONS[$appname]:-}"
+		if [[ -z "$versions_str" ]]; then
+			omw_log "No versions defined for '$appname' in packages.sh." "ERROR"
+			exit 1
+		fi
+		for v in $versions_str; do
+			omw_build_software "$appname@$v" "$OMW_FORCE" "$OMW_REFRESH" || exit 1
+		done
+	else
+		omw_build_software "$target" "$OMW_FORCE" "$OMW_REFRESH" || exit 1
+	fi
+}
+
+_omw_cli_run_config() {
+	local target="$1"
+
+	_omw_cli_require_target "config" "$target" "Use: $0 config tmux, vim, zsh, or all."
 	case "$target" in
-	"tmux")
-		log "Configuring tmux..."
-		local cfg_dir="$CONFIG_PATH/tmux"
-		restore_config_package "$target" "$cfg_dir/.tmux" || return 1
-		mkdir -p "$cfg_dir"
-		clone_repo_once "https://github.com/gpakosz/.tmux.git" "$cfg_dir/.tmux" || return 1
-		safe_link_with_backup "$cfg_dir/.tmux/.tmux.conf" "$HOME/.tmux.conf" "tmux"
-		copy_if_absent_with_backup "$cfg_dir/.tmux/.tmux.conf.local" "$HOME/.tmux.conf.local" "tmux"
+	all)
+		omw_configure "tmux" "$OMW_FORCE" || exit 1
+		omw_configure "vim" "$OMW_FORCE" || exit 1
+		omw_configure "zsh" "$OMW_FORCE" || exit 1
 		;;
-	"vim")
-		log "Configuring Vim..."
-		local cfg_dir="$CONFIG_PATH/vim/vim9"
-		restore_config_package "$target" "$cfg_dir" || return 1
-		if ! config_ready_for_package "$target"; then
-			log "Vim config package not found and local Vim config is missing; skipping Vim config." "WARN"
-			return 0
-		fi
-		write_omw_vimrc || return 1
-		;;
-	"zsh")
-		log "Configuring Zsh..."
-		local cfg_dir="$CONFIG_PATH/zsh"
-		restore_config_package "$target" "$cfg_dir/.oh-my-zsh" || return 1
-		mkdir -p "$cfg_dir"
-		clone_repo_once "https://github.com/ohmyzsh/ohmyzsh.git" "$cfg_dir/.oh-my-zsh" || return 1
-		mkdir -p "$cfg_dir/.oh-my-zsh/custom/themes" "$cfg_dir/.oh-my-zsh/custom/plugins"
-		clone_repo_once "https://github.com/romkatv/powerlevel10k.git" "$cfg_dir/.oh-my-zsh/custom/themes/powerlevel10k" || return 1
-		clone_repo_once "https://github.com/zsh-users/zsh-autosuggestions.git" "$cfg_dir/.oh-my-zsh/custom/plugins/zsh-autosuggestions" || return 1
-		clone_repo_once "https://github.com/zsh-users/zsh-syntax-highlighting.git" "$cfg_dir/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" || return 1
-		link_if_absent_with_backup "$cfg_dir/.oh-my-zsh" "$HOME/.oh-my-zsh" "zsh"
-		# Only create a .zshrc if one does not exist
-		if [[ ! -f "$HOME/.zshrc" ]]; then
-			cp "$cfg_dir/.oh-my-zsh/templates/zshrc.zsh-template" "$HOME/.zshrc"
-			sed -i 's|ZSH_THEME="robbyrussell"|ZSH_THEME="powerlevel10k/powerlevel10k"|g' "$HOME/.zshrc"
-			sed -i 's|plugins=(git)|plugins=(git autojump zsh-autosuggestions zsh-syntax-highlighting)|g' "$HOME/.zshrc"
-		fi
-		# Ensure OMW environment is sourced in .zshrc
-		# shellcheck disable=SC2016
-		append_line_with_backup "$HOME/.zshrc" "OMW_HOME" "$(printf '\n# OMW Config\nexport OMW_HOME="%s"\n[[ -f "$OMW_HOME/env.sh" ]] && source "$OMW_HOME/env.sh"' "$OMW_HOME")" "zsh"
-		# Add a hook for user customizations if it doesn't exist
-		# shellcheck disable=SC2016
-		append_line_with_backup "$HOME/.zshrc" ".zshrc_custom" '
-# User customizations file
-[[ -f "$HOME/.zshrc_custom" ]] && source "$HOME/.zshrc_custom"' "zsh"
-		# Create the custom file if it's missing
-		if [[ ! -f "$HOME/.zshrc_custom" ]]; then
-			cat >"$HOME/.zshrc_custom" <<-EOF
-				# Add your custom Zsh configurations here
-				# For example, set your preferred editor:
-				# export EDITOR='nvim'
-			EOF
-		fi
+	tmux | vim | zsh)
+		omw_configure "$target" "$OMW_FORCE" || exit 1
 		;;
 	*)
-		log "Unknown config target: $target" "ERROR"
-		return 1
+		omw_log "Invalid config target. Use: tmux, vim, zsh, all." "ERROR"
+		exit 1
 		;;
 	esac
-	log "$target configuration complete." "SUCCESS"
-	print_config_backup_paths
 }
 
-init_shell_env() {
-	local bashrc="$HOME/.bashrc"
+_omw_cli_run_clean() {
+	local target="$1"
 
-	log "Initializing OMW shell environment..." "INFO"
-	# shellcheck disable=SC2016
-	append_line_with_backup "$bashrc" "$OMW_HOME/env.sh" "$(printf '\n# OMW Config\n[[ -f "%s/env.sh" ]] && source "%s/env.sh"' "$OMW_HOME" "$OMW_HOME")" "bash"
-	log "OMW environment source line is configured in $bashrc" "SUCCESS"
+	_omw_cli_require_target "clean" "$target" "Use: $0 clean builds, packages, installs, apps, or all."
+	omw_log "Cleaning $target..."
+	case "$target" in
+	builds) omw_safe_rm_rf "$BUILDS_PATH" ;;
+	packages) _omw_cli_clean_packages ;;
+	installs)
+		omw_safe_rm_rf "$SOFTWARE_INSTALL_PATH"
+		omw_safe_rm_rf "$MODULEFILES_PATH"
+		;;
+	apps)
+		omw_safe_rm_rf "$APPS_INSTALL_PATH"
+		omw_clear_directory_contents "$SCRIPTS_BIN_PATH"
+		;;
+	all)
+		omw_safe_rm_rf "$BUILDS_PATH"
+		_omw_cli_clean_packages
+		omw_safe_rm_rf "$OMW_HOME/tools"
+		omw_safe_rm_rf "$APPS_INSTALL_PATH"
+		omw_clear_directory_contents "$SCRIPTS_BIN_PATH"
+		;;
+	*)
+		omw_log "Invalid clean target. Use: builds, packages, installs, apps, all." "ERROR"
+		exit 1
+		;;
+	esac
+	omw_log "Clean complete." "SUCCESS"
 }
 
-# Creates offline bundle by downloading all defined versions of all software
-create_offline_bundle() {
-	log "--- Creating OMW Offline Bundle ---" "INFO"
-	ensure_valid_cwd
-	# 1. Download all required assets
-	log "Step 1: Downloading all software and app packages..."
-	for app in "${SOFTWARE_LIST[@]}"; do
-		local versions_str="${SOFTWARE_VERSIONS[$app]}"
-		[[ -z "$versions_str" ]] && continue
-		for version in $versions_str; do
-			local url
-			url=$(_get_software_url "$app" "$version")
-			if [[ -n "$url" ]] && ! download_package "$url" "$PACKAGES_PATH/software/$(basename "$url")"; then
-				return 1
-			fi
-		done
+_omw_cli_clean_packages() {
+	local item base
+
+	mkdir -p "$PACKAGES_PATH"
+	for item in "$PACKAGES_PATH"/* "$PACKAGES_PATH"/.[!.]* "$PACKAGES_PATH"/..?*; do
+		[[ -e "$item" || -L "$item" ]] || continue
+		base=$(basename "$item")
+		[[ "$base" == "config" ]] && continue
+		omw_safe_rm_rf "$item"
 	done
-	for app in "${APP_LIST[@]}"; do
-		if ! download_package "${APP_URLS[$app]}" "$PACKAGES_PATH/apps/$(basename "${APP_URLS[$app]}")"; then
-			return 1
-		fi
-		local source_url="${APP_SOURCE_URLS[$app]:-}"
-		if [[ -n "$source_url" ]] && ! download_package "$source_url" "$PACKAGES_PATH/apps/$(basename "$source_url")"; then
-			return 1
-		fi
-	done
-
-	if ! prefetch_gcc_prereqs; then
-		return 1
-	fi
-
-	log "Step 2: Preparing local dependencies (RPMs)..."
-	if ! build_local "false" "false" "${SOFTWARE_VERSIONS[local]}"; then # Run build_local for its download side-effect
-		return 1
-	fi
-	if [[ -d "$BUILDS_PATH/local-rpms" ]] && [[ ! -f "$PACKAGES_PATH/rpms.tar.gz" ]]; then
-		if ! tar -czf "$PACKAGES_PATH/rpms.tar.gz" -C "$BUILDS_PATH/local-rpms" .; then
-			log "Failed to create local RPM package bundle." "ERROR"
-			return 1
-		fi
-	fi
-
-	log "Step 3: Packaging existing configurations..."
-	if ! package_all_configs; then
-		return 1
-	fi
-	ensure_valid_cwd
-
-	# 3.1 Generate checksums for all packages
-	if ! write_checksums; then
-		return 1
-	fi
-
-	# 3.2 Verify offline completeness before packing
-	log "Step 4: Verifying offline completeness..."
-	if ! verify_offline; then
-		log "Offline verification failed. Please fix missing items before packing." "ERROR"
-		return 1
-	fi
-
-	# 4. Create the final archive
-	local archive_name
-	archive_name="omw-offline-bundle-$(date +%Y%m%d).tar.gz"
-	log "Step 5: Creating final archive: $archive_name"
-	cd "$OMW_HOME"
-	local tmp_archive="$HOME/.${archive_name}.tmp"
-	local staging_dir="$BUILDS_PATH/.offline-bundle-$$"
-	local bundle_root="$staging_dir/oh-my-workspace"
-	local archive_items=()
-	local item
-	for item in omw env.sh software.conf README.md compose.yaml packages; do
-		[[ -e "$item" ]] && archive_items+=("$item")
-	done
-	safe_rm_rf "$staging_dir"
-	mkdir -p "$bundle_root"
-	for item in "${archive_items[@]}"; do
-		cp -a "$item" "$bundle_root/"
-	done
-	if ! tar -czf "$tmp_archive" -C "$staging_dir" oh-my-workspace; then
-		safe_rm_rf "$staging_dir"
-		rm -f "$tmp_archive"
-		log "Failed to create offline bundle archive." "ERROR"
-		return 1
-	fi
-	safe_rm_rf "$staging_dir"
-	mv -f "$tmp_archive" "$HOME/$archive_name"
-	log "Offline bundle created successfully!" "SUCCESS"
-	log "To use, transfer '$HOME/$archive_name' to an offline machine, extract it, and run './omw --all'" "INFO"
+	mkdir -p "$PACKAGES_PATH/config"
 }
 
-###############################################################################
-# Main Execution
-###############################################################################
+_omw_cli_run_command() {
+	case "$OMW_COMMAND" in
+	help) _omw_cli_print_help ;;
+	init) omw_init_shell_env || exit 1 ;;
+	all) _omw_cli_run_all ;;
+	build) _omw_cli_run_build "$OMW_TARGET" ;;
+	app-install)
+		_omw_cli_require_target "app install" "$OMW_TARGET" "Example: $0 app install rg"
+		omw_install_app "$OMW_TARGET" "$OMW_FORCE" || exit 1
+		;;
+	app-install-all)
+		local app
+		for app in "${APP_LIST[@]}"; do omw_install_app "$app" "$OMW_FORCE" || exit 1; done
+		;;
+	config) _omw_cli_run_config "$OMW_TARGET" ;;
+	offline-pack) omw_create_offline_bundle || exit 1 ;;
+	offline-verify) omw_verify_offline || exit 1 ;;
+	status)
+		if [[ "$OMW_TARGET" == "installed" ]]; then
+			omw_print_status "false"
+		else
+			omw_print_status "true"
+		fi
+		;;
+	update-check) omw_check_updates || exit 1 ;;
+	clean) _omw_cli_run_clean "$OMW_TARGET" ;;
+	*)
+		omw_log "No command specified." "WARN"
+		_omw_cli_print_help
+		exit 1
+		;;
+	esac
+}
+
 main() {
-	init_globals
-	[[ $# -eq 0 ]] && {
-		main --help
-		exit 0
-	}
-
-	# Advanced argument parsing
-	local command=""
-	local target=""
-	local force=false
-	local refresh=false
-
-	while [[ $# -gt 0 ]]; do
-		case "$1" in
-		init | --init | -a | --all | -b | --build | -i | --install | --install-all-apps | -c | --config | --clean | -p | --pack | --verify-offline | --status | --list | --installed | --check-updates)
-			[[ -n "$command" ]] && {
-				log "Only one command can be specified at a time." "ERROR"
-				exit 1
-			}
-			command="$1"
-			shift
-			# These commands do not take a target argument
-			if [[ "$command" != "init" && "$command" != "--init" && "$command" != "--install-all-apps" && "$command" != "-p" && "$command" != "--pack" && "$command" != "-a" && "$command" != "--all" && "$command" != "--verify-offline" && "$command" != "--status" && "$command" != "--list" && "$command" != "--installed" && "$command" != "--check-updates" ]]; then
-				if [[ $# -eq 0 || "$1" == --* ]]; then
-					log "Command '$command' requires a target argument." "ERROR"
-					exit 1
-				fi
-				target="$1"
-				shift
-			fi
-			;;
-		--force)
-			force=true
-			shift
-			;;
-		--refresh)
-			refresh=true
-			shift
-			;;
-		-h | --help)
-			command="$1"
-			shift
-			;;
-		*)
-			log "Invalid option or command: $1" "ERROR"
-			main --help
-			exit 1
-			;;
-		esac
-	done
-
-	case "$command" in
-	init | --init | -h | --help | --status | --list | --installed | --check-updates) ;;
-	*) check_sys_deps ;;
-	esac
-
-	# Command execution
-	case "$command" in
-	init | --init)
-		init_shell_env || exit 1
-		;;
-	-a | --all)
-		# Loop through all software and all their defined versions
-		for sw in "${SOFTWARE_LIST[@]}"; do
-			local versions_str="${SOFTWARE_VERSIONS[$sw]}"
-			[[ -z "$versions_str" ]] && continue
-			for version in $versions_str; do
-				if [[ "$sw" == "gcc" ]]; then
-					log "Skipping optional software 'gcc' in --all build. Build it explicitly with '--build gcc'." "INFO"
-					continue
-				fi
-				# Ensure a clean environment for each build
-				ensure_module_command || exit 1
-				module purge || exit 1
-				build_software "$sw@$version" "$force" "$refresh" || exit 1
-			done
-		done
-		for app in "${APP_LIST[@]}"; do install_app "$app" "$force" || exit 1; done
-		configure "tmux" || exit 1
-		configure "vim" || exit 1
-		configure "zsh" || exit 1
-		;;
-	-b | --build)
-		[[ -z "$target" ]] && {
-			log "Build command requires a software target, e.g., 'vim' or 'python@3.9.18'." "ERROR"
-			exit 1
-		}
-		local appname version
-		read -r appname version < <(_parse_target "$target")
-		# If no version is specified, build all available versions for that app
-		if [[ -z "$version" ]]; then
-			log "No version specified for '$appname'. Building all defined versions." "INFO"
-			local versions_str="${SOFTWARE_VERSIONS[$appname]}"
-			if [[ -z "$versions_str" ]]; then
-				log "No versions defined for '$appname' in software.conf." "ERROR"
-				exit 1
-			fi
-			for v in $versions_str; do
-				build_software "$appname@$v" "$force" "$refresh" || exit 1
-			done
-		else
-			# Build the specific version requested
-			build_software "$target" "$force" "$refresh" || exit 1
-		fi
-		;;
-	-i | --install)
-		[[ -z "$target" ]] && {
-			log "Install command requires an app target." "ERROR"
-			exit 1
-		}
-		install_app "$target" "$force" || exit 1
-		;;
-	--install-all-apps)
-		for app in "${APP_LIST[@]}"; do install_app "$app" "$force" || exit 1; done
-		;;
-	-c | --config)
-		[[ -z "$target" ]] && {
-			log "Config command requires a target ('tmux', 'vim', or 'zsh')." "ERROR"
-			exit 1
-		}
-		configure "$target" || exit 1
-		;;
-	--clean)
-		log "Cleaning ${target#--}..."
-		case "${target#--}" in
-		"builds") safe_rm_rf "$BUILDS_PATH" ;;
-		"packages") safe_rm_rf "$PACKAGES_PATH" ;;
-		"installs")
-			safe_rm_rf "$SOFTWARE_INSTALL_PATH"
-			safe_rm_rf "$MODULEFILES_PATH"
-			;;
-		"apps")
-			safe_rm_rf "$APPS_INSTALL_PATH"
-			clear_directory_contents "$SCRIPTS_BIN_PATH"
-			;;
-		"all")
-			safe_rm_rf "$BUILDS_PATH"
-			safe_rm_rf "$PACKAGES_PATH"
-			safe_rm_rf "$OMW_HOME/tools"
-			safe_rm_rf "$APPS_INSTALL_PATH"
-			clear_directory_contents "$SCRIPTS_BIN_PATH"
-			;;
-		*)
-			log "Invalid clean target. Use: builds, packages, installs, apps, all." "ERROR"
-			exit 1
-			;;
-		esac
-		log "Clean complete." "SUCCESS"
-		;;
-	-p | --pack)
-		create_offline_bundle || exit 1
-		;;
-	--verify-offline)
-		if verify_offline; then
-			exit 0
-		else
-			exit 1
-		fi
-		;;
-	--status | --list)
-		print_status "true"
-		;;
-	--installed)
-		print_status "false"
-		;;
-	--check-updates)
-		check_updates || exit 1
-		;;
-	-h | --help)
-		cat <<-EOF
-			Usage: $0 [command] <target> [options]
-			OMW - A self-contained development environment manager.
-
-			Commands:
-			  -a, --all               Install all defined versions of all software, all apps, and apply configurations.
-			  -b, --build <target>    Build specific software. Target can be 'name' (builds all versions)
-			                          or 'name@version' (builds a specific version).
-			  -i, --install <app>     Install a specific pre-compiled app (e.g., eza).
-			  --install-all-apps      Install all pre-compiled apps.
-			  init, --init            Backup ~/.bashrc and add OMW env.sh source line.
-			  -c, --config <target>   Configure a specific tool ('tmux', 'vim', or 'zsh').
-			  --clean <target>        Clean directories. Targets: builds, packages, installs, apps, all.
-			  -p, --pack              Create a comprehensive offline deployment bundle with all versions.
-			  --verify-offline        Verify all assets are present for a fully offline build.
-			  --status, --list        Show installed and installable software/apps in a table.
-			  --installed             Show only installed or partially installed items.
-			  --check-updates         Check supported upstream sources and report newer versions.
-			  -h, --help              Show this help message.
-
-			Options for build/install:
-			  --force                 Force re-installation (will backup existing).
-			  --refresh               Only refresh the modulefile for a built software.
-
-			Examples:
-			  # Build all defined versions of vim
-			  $0 --build vim
-
-			  # Build a specific version of python, forcing a rebuild
-			  $0 --build python@3.9.18 --force
-
-			  # Install the exa command-line tool
-			  $0 --install exa
-
-			  # See what is installed and what can be installed
-			  $0 --status
-
-			  # Add OMW environment setup to ~/.bashrc
-			  $0 init
-
-			  # Check whether configured software/apps have newer upstream versions
-			  $0 --check-updates
-
-			  # Create an offline bundle for deployment on another machine
-			  $0 --pack
-
-			Software to build: ${SOFTWARE_LIST[*]}
-			Apps to install: ${APP_LIST[*]}
-		EOF
-		;;
-	*)
-		log "No command specified." "WARN"
-		main --help
-		;;
-	esac
+	omw_init_globals
+	_omw_cli_parse "$@"
+	if _omw_cli_requires_sys_deps "$OMW_COMMAND"; then
+		omw_check_sys_deps
+	fi
+	_omw_cli_run_command
 }
 
 main "$@"

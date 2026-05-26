@@ -1,5 +1,6 @@
+name: oh-my-workspace
 services:
-  centos7-x86:
+  omw:
     image: centos:7
     platform: linux/amd64
     working_dir: /workspace
@@ -20,29 +21,19 @@ services:
           /etc/yum.repos.d/CentOS-Base.repo
 
         rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 || true
-
-        yum install -y --setopt=tsflags=nodocs \
-          cpio \
-          environment-modules \
-          findutils \
-          git \
-          make \
-          rpm-build \
-          tar \
-          unzip \
-          wget \
-          which \
-          yum-utils \
-          gcc
-
         yum clean all
+        yum -y makecache
+        yum -y install epel-release
+        yum -y groupinstall "Development Tools"
+        # Add curl and jq for the release step
+        yum -y install git which findutils coreutils wget tar make gcc gcc-c++ unzip cpio yum-utils environment-modules xz-devel bzip2 python3 rpm2cpio ncurses-devel curl jq perl-ExtUtils-ParseXS
 
         # BASH_ENV makes future docker compose exec Bash commands load module;
         # source it here because this shell started before the package existed.
         source /etc/profile.d/modules.sh
 
         bash -n omw
-        bash -n software.conf
+        bash -n packages.sh
         bash -n env.sh
         type module
         ./omw --help >/dev/null
