@@ -26,12 +26,23 @@ jobs:
     steps:
       - name: Prepare CentOS 7 EOL Environment and Install Dependencies
         run: |
-          sed -i \
-            -e 's|^mirrorlist=|#mirrorlist=|g' \
-            -e 's|^#baseurl=http://mirror.centos.org/centos/$$releasever|baseurl=http://vault.centos.org/7.9.2009|g' \
-            /etc/yum.repos.d/CentOS-Base.repo
-
-          rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 || true
+          cat <<'EOF' > /etc/yum.repos.d/CentOS-Base.repo
+          [base]
+          name=CentOS-$releasever - Base
+          baseurl=http://vault.centos.org/7.9.2009/os/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          [updates]
+          name=CentOS-$releasever - Updates
+          baseurl=http://vault.centos.org/7.9.2009/updates/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          [extras]
+          name=CentOS-$releasever - Extras
+          baseurl=http://vault.centos.org/7.9.2009/extras/$basearch/
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+          EOF
           yum clean all
           yum -y makecache
           yum -y install epel-release
