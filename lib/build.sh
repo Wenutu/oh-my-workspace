@@ -436,9 +436,31 @@ omw_build_local() {
 		: >"$yum_log"
 		omw_log "RPM download directory: $rpm_dir" "INFO"
 		omw_log "yumdownloader log: $yum_log" "INFO"
-		if ! yumdownloader --downloadonly --destdir="$rpm_dir" --resolve --archlist=x86_64,noarch "${rpms_to_download[@]}" >"$yum_log" 2>&1; then
+		local yumdownloader_cmd=(
+			yumdownloader
+			--downloadonly
+			--destdir="$rpm_dir"
+			--resolve
+			"${rpms_to_download[@]}"
+		)
+		local yumdownloader_ok=false
+		local yumdownloader_attempt
+		for yumdownloader_attempt in 1 2; do
+			: >"$yum_log"
+			if "${yumdownloader_cmd[@]}" >"$yum_log" 2>&1; then
+				yumdownloader_ok=true
+				break
+			fi
+			if ((yumdownloader_attempt == 1)); then
+				omw_log "RPM dependency download failed; cleaning yum metadata and retrying once." "WARN"
+				find "$rpm_dir" -maxdepth 1 \( -name "*.rpm" -o -name "*.tmp*" \) -delete || true
+				yum --enablerepo=base clean metadata >>"$yum_log" 2>&1 || true
+				yum -y makecache >>"$yum_log" 2>&1 || true
+			fi
+		done
+		if [[ "$yumdownloader_ok" != "true" ]]; then
 			omw_log "RPM dependency download failed." "ERROR"
-			omw_log "Command: yumdownloader --downloadonly --destdir=\"$rpm_dir\" --resolve --archlist=x86_64,noarch ${rpms_to_download[*]}" "ERROR"
+			omw_log "Command: ${yumdownloader_cmd[*]}" "ERROR"
 			omw_log "Requested RPM dependencies (${#rpms_to_download[@]}): ${rpms_to_download[*]}" "ERROR"
 			omw_log "Full yumdownloader log: $yum_log" "ERROR"
 			if command -v yum >/dev/null 2>&1; then
