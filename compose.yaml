@@ -39,5 +39,5 @@ services:
         ./omw --help >/dev/null
 
         echo "OMW CentOS 7 x86 test container is ready."
-        echo "Try: docker compose exec centos7-x86 ./omw --verify-offline"
+        echo "Try: docker compose exec omw ./omw --verify-offline"
         tail -f /dev/null

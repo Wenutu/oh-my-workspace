@@ -117,7 +117,9 @@ jobs:
           2. Transfer it to your offline CentOS 7 machine.
           3. Extract the archive: \`tar -xzf ${ASSET_NAME}\`
           4. Navigate into the extracted directory.
-          5. Run the installer: \`./omw --all\`
+          5. Init omw: \`./omw init\`
+          6. Resource bashrc: \`source ~/.bashrc\`
+          7. Run the installer: \`./omw all\`
 
           For more details, see the [project repository](${REPO_URL}).
           EOF

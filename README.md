@@ -162,7 +162,7 @@ source ~/.bashrc
 
 This downloads all sources/apps, GCC prerequisites, local RPMs, packages existing config directories, prepares the npm cache archive for declared Node packages, verifies integrity, and then creates `~/omw-offline-bundle-YYYYMMDD.tar.gz`.
 
-During `offline pack`, OMW first builds any declared OMW Node versions needed by `node_package` or `node_cache_package`, then loads the matching module to populate `packages/node/npm-cache`. After verification, it compresses that cache to `packages/node/npm-cache.tar.gz` and removes the expanded cache directory so the final offline bundle only carries the archive. On the offline machine, `./omw node restore-cache`, `./omw node verify`, and `./omw node install <alias>` automatically extract the cache archive when needed.
+During `offline pack`, OMW first builds any declared OMW Node versions needed by `node_package` or `node_cache_package`, then loads the matching module to populate `builds/node/npm-cache`. After verification, it compresses that cache to `packages/node/npm-cache.tar.gz`; the final offline bundle excludes `builds`, so it only carries the archive. On the offline machine, `./omw node restore-cache`, `./omw node verify`, and `./omw node install <alias>` automatically extract the cache archive when needed.
 
 ### Offline Install Machine
 
@@ -199,14 +199,14 @@ cd /path/to/oh-my-workspace
 module load node/node-22.22.3
 
 cd /path/to/other-node-project
-npm ci --offline --cache "$OMW_HOME/packages/node/npm-cache"
+npm ci --offline --cache "$OMW_HOME/builds/node/npm-cache"
 ```
 
 For a project-local default, create `.npmrc` in that project:
 
 ```ini
 offline=true
-cache=/path/to/oh-my-workspace/packages/node/npm-cache
+cache=/path/to/oh-my-workspace/builds/node/npm-cache
 audit=false
 fund=false
 ```
@@ -216,27 +216,6 @@ Then normal npm commands in that project use the restored cache:
 ```bash
 npm ci
 npm install
-```
-
-Neovim can set the same npm cache for plugins or commands that spawn npm. Example `~/.config/nvim/init.vim`:
-
-```vim
-let $OMW_HOME = expand('/path/to/oh-my-workspace')
-let $npm_config_offline = 'true'
-let $npm_config_cache = $OMW_HOME . '/packages/node/npm-cache'
-let $npm_config_audit = 'false'
-let $npm_config_fund = 'false'Z
-```
-
-For Lua-based Neovim config:
-
-```lua
-local omw_home = "/path/to/oh-my-workspace"
-vim.env.OMW_HOME = omw_home
-vim.env.npm_config_offline = "true"
-vim.env.npm_config_cache = omw_home .. "/packages/node/npm-cache"
-vim.env.npm_config_audit = "false"
-vim.env.npm_config_fund = "false"
 ```
 
 Re-run `./omw offline verify` any time you want to check that the extracted offline assets are still complete.

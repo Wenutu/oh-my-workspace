@@ -70,8 +70,10 @@ _omw_offline_write_checksums() {
 	tmp_sums=$(mktemp "$PACKAGES_PATH/.SHA256SUMS.XXXXXX")
 	if command -v sha256sum &>/dev/null; then
 		omw_log "Generating checksums..." "INFO"
-		# Exclude existing checksum file to avoid recursion
-		if ! find "$PACKAGES_PATH" -type f ! -name "SHA256SUMS" ! -name ".SHA256SUMS.*" -print0 | sort -z | xargs -0 sha256sum >"$tmp_sums"; then
+		# Exclude existing checksum files and any legacy expanded npm cache; only npm-cache.tar.gz is bundled.
+		if ! find "$PACKAGES_PATH" \
+			-path "$PACKAGES_PATH/node/npm-cache" -prune -o \
+			-type f ! -name "SHA256SUMS" ! -name ".SHA256SUMS.*" -print0 | sort -z | xargs -0 sha256sum >"$tmp_sums"; then
 			rm -f "$tmp_sums"
 			omw_log "Failed to generate checksums." "ERROR"
 			return 1
@@ -402,10 +404,20 @@ omw_create_offline_bundle() {
 	for item in "${archive_items[@]}"; do
 		cp -a "$item" "$bundle_root/"
 	done
+	if [[ -d "$bundle_root/packages/node/npm-cache" ]]; then
+		omw_log "Excluding expanded npm cache from offline bundle; keeping packages/node/npm-cache.tar.gz only." "INFO"
+		omw_safe_rm_rf "$bundle_root/packages/node/npm-cache"
+	fi
 	if ! tar -czf "$tmp_archive" -C "$staging_dir" oh-my-workspace; then
 		omw_safe_rm_rf "$staging_dir"
 		rm -f "$tmp_archive"
 		omw_log "Failed to create offline bundle archive." "ERROR"
+		return 1
+	fi
+	if tar -tzf "$tmp_archive" | grep -Eq '^oh-my-workspace/packages/node/npm-cache(/|$)'; then
+		omw_safe_rm_rf "$staging_dir"
+		rm -f "$tmp_archive"
+		omw_log "Offline bundle unexpectedly contains expanded npm cache directory." "ERROR"
 		return 1
 	fi
 	omw_safe_rm_rf "$staging_dir"

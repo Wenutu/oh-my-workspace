@@ -2,7 +2,7 @@ SHELL := /bin/bash
 
 CONFIGS ?= vim tmux zsh
 OUT_DIR ?= packages/config
-PACK_SERVICE ?= centos7-x86
+PACK_SERVICE ?= omw
 TAR_FORMAT ?= gnu
 LINUX_TAR ?= tar
 
@@ -20,8 +20,8 @@ help:
 	@printf '%s\n' 'Variables:'
 	@printf '%s\n' '  OUT_DIR=/path/to/output'
 	@printf '%s\n' '  CONFIGS="vim tmux zsh"'
-	@printf '%s\n' '  PACK_SERVICE=centos7-x86'
-	@printf '%s\n' '  LINUX_TAR="docker compose exec -T centos7-x86 tar --format=gnu"'
+	@printf '%s\n' '  PACK_SERVICE=omw'
+	@printf '%s\n' '  LINUX_TAR="docker compose exec -T omw tar --format=gnu"'
 
 pack-vim:
 	@set -eu; \

@@ -420,6 +420,7 @@ _omw_cli_run_clean() {
 		;;
 	node)
 		omw_safe_rm_rf "$PACKAGES_PATH/node"
+		omw_safe_rm_rf "$BUILDS_PATH/node"
 		;;
 	all)
 		omw_safe_rm_rf "$BUILDS_PATH"

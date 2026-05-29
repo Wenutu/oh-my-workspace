@@ -7,7 +7,7 @@ _omw_node_cache_dir() {
 		printf '%s' "$OMW_NODE_CACHE_DIR_OVERRIDE"
 		return 0
 	fi
-	printf '%s/node/npm-cache' "$PACKAGES_PATH"
+	printf '%s/node/npm-cache' "$BUILDS_PATH"
 }
 
 _omw_node_cache_archive_path() {
@@ -149,13 +149,13 @@ _omw_node_restore_cache_archive() {
 	cache_dir=$(_omw_node_cache_dir)
 	archive_path=$(_omw_node_cache_archive_path)
 
-	_omw_node_cache_ready && return 0
 	if ! _omw_node_cache_archive_ready; then
 		return 1
 	fi
 
-	omw_log "Restoring npm cache from $archive_path" "INFO"
+	omw_log "Restoring npm cache from $archive_path to $cache_dir" "INFO"
 	mkdir -p "$(dirname "$cache_dir")"
+	omw_safe_rm_rf "$cache_dir"
 	if ! tar -xzf "$archive_path" -C "$(dirname "$cache_dir")"; then
 		omw_log "Failed to restore npm cache archive: $archive_path" "ERROR"
 		return 1
@@ -298,8 +298,6 @@ omw_node_pack() {
 	if ! _omw_node_write_cache_archive; then
 		return 1
 	fi
-	omw_safe_rm_rf "$cache_dir"
-	omw_log "Removed expanded npm cache after creating archive." "INFO"
 }
 
 omw_node_verify() {
@@ -312,7 +310,7 @@ omw_node_verify() {
 	fi
 
 	cache_dir=$(_omw_node_cache_dir)
-	if [[ "$mode" == "temp" && ! _omw_node_cache_ready && _omw_node_cache_archive_ready ]]; then
+	if [[ "$mode" == "temp" ]] && ! _omw_node_cache_ready && _omw_node_cache_archive_ready; then
 		verify_cache_dir="$BUILDS_PATH/.node-cache-verify/npm-cache"
 		old_cache_override="${OMW_NODE_CACHE_DIR_OVERRIDE:-}"
 		omw_safe_rm_rf "$BUILDS_PATH/.node-cache-verify"
@@ -404,10 +402,6 @@ omw_node_restore_cache() {
 
 	cache_dir=$(_omw_node_cache_dir)
 	archive_path=$(_omw_node_cache_archive_path)
-	if _omw_node_cache_ready; then
-		omw_log "Expanded npm cache already exists: $cache_dir" "SUCCESS"
-		return 0
-	fi
 	if ! _omw_node_restore_cache_archive; then
 		omw_log "npm cache archive is missing or unreadable: $archive_path" "ERROR"
 		return 1

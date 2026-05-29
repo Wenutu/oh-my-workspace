@@ -71,7 +71,7 @@ omw_init_globals() {
 
 _omw_common_validate_config() {
 	local errors=0
-	local name version versions_str deps dep dep_name dep_version app alias package_name bin_name node_version
+	local name version versions_str key url build_cmd deps dep dep_name dep_version app alias package_name bin_name node_version
 	local placeholder="${OMW_NONE:--}"
 
 	for name in "${SOFTWARE_LIST[@]}"; do
@@ -85,30 +85,41 @@ _omw_common_validate_config() {
 			((++errors))
 			continue
 		fi
-		if [[ -z "${SOFTWARE_CONFIG_CMDS[$name]+set}" ]]; then
-			omw_log "SOFTWARE_CONFIG_CMDS[$name] is not defined." "ERROR"
-			((++errors))
-		elif [[ -z "${SOFTWARE_CONFIG_CMDS[$name]}" || "${SOFTWARE_CONFIG_CMDS[$name]}" == "$placeholder" ]]; then
-			omw_log "SOFTWARE_CONFIG_CMDS[$name] must be a command template or 'special'." "ERROR"
-			((++errors))
-		fi
-		if [[ "${SOFTWARE_URLS[$name]:-}" == "$placeholder" ]]; then
-			omw_log "SOFTWARE_URLS[$name] still contains the empty-field placeholder." "ERROR"
-			((++errors))
-		fi
 		for version in $versions_str; do
+			key="$name@$version"
 			if [[ "$version" == "$placeholder" ]]; then
 				omw_log "SOFTWARE_VERSIONS[$name] contains the empty-field placeholder." "ERROR"
 				((++errors))
 			fi
-			if [[ -z "${SOFTWARE_DEPS["$name@$version"]+set}" ]]; then
-				omw_log "SOFTWARE_DEPS[$name@$version] is not defined." "ERROR"
+			if [[ -z "${SOFTWARE_CONFIG_CMDS[$key]+set}" ]]; then
+				omw_log "SOFTWARE_CONFIG_CMDS[$key] is not defined." "ERROR"
+				((++errors))
+			else
+				build_cmd="${SOFTWARE_CONFIG_CMDS[$key]}"
+				if [[ -z "$build_cmd" || "$build_cmd" == "$placeholder" ]]; then
+					omw_log "SOFTWARE_CONFIG_CMDS[$key] must be a command template or 'special'." "ERROR"
+					((++errors))
+				elif [[ "$build_cmd" == "special" && "$name" != "local" ]] && ! declare -F "_omw_build_$name" >/dev/null; then
+					omw_log "SOFTWARE_CONFIG_CMDS[$key] is special but _omw_build_$name is not defined." "ERROR"
+					((++errors))
+				fi
+			fi
+			url="${SOFTWARE_URLS[$key]:-}"
+			if [[ "$url" == "$placeholder" ]]; then
+				omw_log "SOFTWARE_URLS[$key] still contains the empty-field placeholder." "ERROR"
+				((++errors))
+			elif [[ "$name" != "local" && -z "$url" ]]; then
+				omw_log "SOFTWARE_URLS[$key] must be defined." "ERROR"
+				((++errors))
+			fi
+			if [[ -z "${SOFTWARE_DEPS[$key]+set}" ]]; then
+				omw_log "SOFTWARE_DEPS[$key] is not defined." "ERROR"
 				((++errors))
 				continue
 			fi
-			deps="${SOFTWARE_DEPS["$name@$version"]}"
+			deps="${SOFTWARE_DEPS[$key]}"
 			if [[ "$deps" == "$placeholder" ]]; then
-				omw_log "SOFTWARE_DEPS[$name@$version] still contains the empty-field placeholder." "ERROR"
+				omw_log "SOFTWARE_DEPS[$key] still contains the empty-field placeholder." "ERROR"
 				((++errors))
 			fi
 			for dep in $deps; do
@@ -154,6 +165,10 @@ _omw_common_validate_config() {
 			omw_log "APP_EXECUTABLE_NAME[$app] contains the empty-field placeholder." "ERROR"
 			((++errors))
 		}
+		if [[ "${APP_EXECUTABLE_NAME[$app]:-}" == "special" ]] && ! declare -F "_omw_app_install_$app" >/dev/null; then
+			omw_log "APP_EXECUTABLE_NAME[$app] is special but _omw_app_install_$app is not defined." "ERROR"
+			((++errors))
+		fi
 	done
 
 	validate_node_package_version() {
@@ -500,7 +515,8 @@ omw_ensure_module_command() {
 omw_get_software_url() {
 	local appname="$1"
 	local version="$2"
-	local url_template="${SOFTWARE_URLS[$appname]}"
+	local key="$appname@$version"
+	local url_template="${SOFTWARE_URLS[$key]:-${SOFTWARE_URLS[$appname]:-}}"
 	# Replace the {VERSION} placeholder with the actual version number
 	echo "${url_template//\{VERSION\}/$version}"
 }

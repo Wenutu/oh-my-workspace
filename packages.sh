@@ -87,11 +87,11 @@ software() {
 		SOFTWARE_VERSIONS["$name"]+="${SOFTWARE_VERSIONS[$name]:+ }$version"
 	fi
 
-	SOFTWARE_URLS["$name"]="$url"
+	SOFTWARE_URLS["$name@$version"]="$url"
 	SOFTWARE_DEPS["$name@$version"]="$deps"
-	SOFTWARE_CONFIG_CMDS["$name"]="$build_cmd"
-	[[ -n "$cflags" ]] && SOFTWARE_CFLAGS["$name"]="$cflags"
-	[[ -n "$ldflags" ]] && SOFTWARE_LDFLAGS["$name"]="$ldflags"
+	SOFTWARE_CONFIG_CMDS["$name@$version"]="$build_cmd"
+	[[ -n "$cflags" ]] && SOFTWARE_CFLAGS["$name@$version"]="$cflags"
+	[[ -n "$ldflags" ]] && SOFTWARE_LDFLAGS["$name@$version"]="$ldflags"
 	return 0
 }
 

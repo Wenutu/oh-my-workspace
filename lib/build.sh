@@ -160,7 +160,12 @@ _omw_build_default() {
 	local appname="$1"
 	local build_dir="$2"
 	local prefix="$3"
-	local config_cmd_template="${SOFTWARE_CONFIG_CMDS[$appname]}"
+	local version
+	local key
+	version=$(basename "$prefix")
+	version=${version#"$appname"-}
+	key="$appname@$version"
+	local config_cmd_template="${SOFTWARE_CONFIG_CMDS[$key]:-${SOFTWARE_CONFIG_CMDS[$appname]:-}}"
 	_omw_build_execute_steps "$build_dir" "$config_cmd_template" "$prefix"
 }
 
@@ -588,8 +593,9 @@ _omw_build_write_modulefile() {
 		EOF
 	fi
 	# Add custom compiler flags if defined in packages.sh
-	local cflags="${SOFTWARE_CFLAGS[$appname]:-}"
-	local ldflags="${SOFTWARE_LDFLAGS[$appname]:-}"
+	local key="$appname@$version"
+	local cflags="${SOFTWARE_CFLAGS[$key]:-${SOFTWARE_CFLAGS[$appname]:-}}"
+	local ldflags="${SOFTWARE_LDFLAGS[$key]:-${SOFTWARE_LDFLAGS[$appname]:-}}"
 	if [[ -n "$cflags" || -n "$ldflags" ]]; then
 		cat >>"$modulefile_path" <<-EOF
 
