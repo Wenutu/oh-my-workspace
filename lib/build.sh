@@ -1,6 +1,26 @@
 # shellcheck shell=bash
 # Public functions in this file use the omw_* prefix.
 # Private helpers use _omw_build_*.
+omw_gcc_prereq_packages() {
+	local extracted_gcc_path="$1"
+	local prereq_script="$extracted_gcc_path/contrib/download_prerequisites"
+
+	if [[ ! -f "$prereq_script" ]]; then
+		omw_log "download_prerequisites script not found in $extracted_gcc_path" "ERROR"
+		return 1
+	fi
+	local prereqs=(
+		"$(grep -oP 'gmp-.*tar\.bz2' "$prereq_script" | head -1 || true)"
+		"$(grep -oP 'mpfr-.*tar\.bz2' "$prereq_script" | head -1 || true)"
+		"$(grep -oP 'mpc-.*tar\.gz' "$prereq_script" | head -1 || true)"
+		"$(grep -oP 'isl-.*tar\.bz2' "$prereq_script" | head -1 || true)"
+	)
+	local pkg
+	for pkg in "${prereqs[@]}"; do
+		[[ -n "$pkg" ]] && echo "$pkg"
+	done
+}
+
 _omw_build_execute_steps() {
 	local build_dir="$1"
 	local configure_cmd_template="$2"
@@ -88,7 +108,7 @@ _omw_build_gcc() {
 
 	omw_log "Preparing GCC prerequisites from local packages..." "INFO"
 	local prereq_pkgs
-	mapfile -t prereq_pkgs < <(_omw_offline_get_gcc_prereq_pkgs "$build_dir")
+	mapfile -t prereq_pkgs < <(omw_gcc_prereq_packages "$build_dir")
 	for pkg in "${prereq_pkgs[@]}"; do
 		local pkg_path="$PACKAGES_PATH/software/$pkg"
 		if [[ ! -f "$pkg_path" ]]; then
@@ -299,7 +319,8 @@ omw_build_software() {
 		done
 	fi
 
-	local prefix="$SOFTWARE_INSTALL_PATH/$appname/$appname-$version"
+	local prefix
+	prefix=$(omw_software_prefix "$appname" "$version")
 	if [[ -d "$prefix" && "$force" == "false" ]]; then
 		if ! _omw_build_write_modulefile "$appname" "$version"; then
 			return 1
@@ -326,7 +347,7 @@ omw_build_software() {
 	fi
 
 	local pkg_path
-	pkg_path="$PACKAGES_PATH/software/$(basename "$url")"
+	pkg_path=$(omw_software_package_path "$appname" "$version")
 	if ! omw_download_package "$url" "$pkg_path" || ! omw_extract_package "$pkg_path" "$build_dir"; then
 		omw_safe_rm_rf "$build_dir"
 		if [[ -n "$backup_dir" && -d "$backup_dir" ]]; then
@@ -384,7 +405,8 @@ omw_build_local() {
 	local force="${1:-false}"
 	local refresh="${2:-false}"
 	local version="${3}" # Version is now passed in
-	local prefix="$SOFTWARE_INSTALL_PATH/local/local-$version"
+	local prefix
+	prefix=$(omw_software_prefix "local" "$version")
 	local rpm_dir="$BUILDS_PATH/local-rpms"
 	local pkg_path="$PACKAGES_PATH/rpms.tar.gz"
 	omw_log "--- Handling local system dependencies ---" "INFO"
@@ -535,7 +557,8 @@ omw_build_local() {
 
 _omw_build_finalize_local_modulefile() {
 	local version="$1"
-	local modulefile_path="$MODULEFILES_PATH/local/local-$version"
+	local modulefile_path
+	modulefile_path=$(omw_software_modulefile "local" "$version")
 
 	if ! sed -i "s|set prefix.*|set prefix  \$base/local/local-$version/usr|g" "$modulefile_path" ||
 		! sed -i "s|\$prefix/lib|\$prefix/lib64|g" "$modulefile_path" ||
@@ -555,7 +578,8 @@ _omw_build_finalize_local_modulefile() {
 _omw_build_write_modulefile() {
 	local appname="$1"
 	local version="$2"
-	local modulefile_path="$MODULEFILES_PATH/$appname/$appname-$version"
+	local modulefile_path
+	modulefile_path=$(omw_software_modulefile "$appname" "$version")
 	omw_log "Generating modulefile for $appname@$version" "INFO"
 	mkdir -p "$(dirname "$modulefile_path")"
 	cat >"$modulefile_path" <<-EOF

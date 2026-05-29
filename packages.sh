@@ -6,6 +6,7 @@
 # array types globally; this file only resets and fills those containers.
 
 declare -p SOFTWARE_LIST >/dev/null 2>&1 || declare -a SOFTWARE_LIST
+declare -p SOFTWARE_BUILD_ALL_EXCLUDES >/dev/null 2>&1 || declare -a SOFTWARE_BUILD_ALL_EXCLUDES
 declare -p APP_LIST >/dev/null 2>&1 || declare -a APP_LIST
 declare -p NODE_PACKAGE_LIST >/dev/null 2>&1 || declare -a NODE_PACKAGE_LIST
 declare -p NODE_CACHE_PACKAGE_LIST >/dev/null 2>&1 || declare -a NODE_CACHE_PACKAGE_LIST
@@ -15,6 +16,7 @@ declare -p NODE_PACKAGE_NAMES >/dev/null 2>&1 || declare -A NODE_PACKAGE_NAMES N
 declare -p NODE_CACHE_PACKAGE_NAMES >/dev/null 2>&1 || declare -A NODE_CACHE_PACKAGE_NAMES NODE_CACHE_PACKAGE_VERSIONS NODE_CACHE_PACKAGE_NODE_VERSIONS
 
 SOFTWARE_LIST=()
+SOFTWARE_BUILD_ALL_EXCLUDES=()
 SOFTWARE_VERSIONS=()
 SOFTWARE_URLS=()
 SOFTWARE_DEPS=()
@@ -188,6 +190,10 @@ node_cache_package() {
 #   7. ldflags    Modulefile LDFLAGS additions. Use "-" when not needed.
 #
 # Use "-" as the only empty-field placeholder. Do not omit positional fields.
+# Ordinary software uses the declared build command. Software with build_cmd
+# "special" must provide a dedicated _omw_build_<name> function in lib/build.sh.
+# Add expensive or rarely needed source tools to SOFTWARE_BUILD_ALL_EXCLUDES
+# when they should be packaged for offline use but built only by explicit request.
 #
 # app fields:
 #   1. name        App name used by `omw app install <name>`.
@@ -196,6 +202,9 @@ node_cache_package() {
 #   4. executable  Executable name to expose, or "special" for a dedicated installer.
 #   5. source_url  Optional source archive URL for offline bundles. Use "-" when not needed.
 #   6. bin_dirs    Optional space-separated bin directories to link wholesale. Use "-" when not needed.
+#
+# Ordinary apps expose executable or bin_dirs. Apps with executable "special"
+# must provide a dedicated _omw_app_install_<name> function in lib/app.sh.
 #
 # node_package fields:
 #   1. alias        Short name used by `omw node install <alias>`.
@@ -254,14 +263,14 @@ software "libevent" \
 	"-" \
 	"-"
 
-# Optional GCC support. Uncomment to enable; the dedicated builder remains in lib/build.sh.
-# software "gcc" \
-# 	"13.2.0" \
-# 	"https://ftp.gnu.org/gnu/gcc/gcc-{VERSION}/gcc-{VERSION}.tar.gz" \
-# 	"-" \
-# 	"special" \
-# 	"-" \
-# 	"-"
+software "gcc" \
+	"13.2.0" \
+	"https://ftp.gnu.org/gnu/gcc/gcc-{VERSION}/gcc-{VERSION}.tar.gz" \
+	"-" \
+	"special" \
+	"-" \
+	"-"
+SOFTWARE_BUILD_ALL_EXCLUDES+=("gcc")
 
 software "python" \
 	"3.12.12" \

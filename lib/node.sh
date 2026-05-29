@@ -46,6 +46,14 @@ _omw_node_has_any_packages() {
 	_omw_node_has_packages || _omw_node_has_cache_packages
 }
 
+omw_node_has_any_packages() {
+	_omw_node_has_any_packages
+}
+
+omw_node_cache_available() {
+	_omw_node_cache_ready || _omw_node_cache_archive_ready
+}
+
 _omw_node_require_alias() {
 	local alias="$1"
 	if [[ -z "${NODE_PACKAGE_NAMES[$alias]:-}" ]]; then

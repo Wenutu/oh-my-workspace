@@ -25,6 +25,7 @@ omw_init_globals() {
 	MODULEFILES_PATH="$OMW_HOME/tools/modulefiles"
 	APPS_INSTALL_PATH="$OMW_HOME/apps"
 	SCRIPTS_BIN_PATH="$OMW_HOME/bin"
+	CONFIG_TARGET_LIST=(tmux vim zsh)
 
 	# Ensure core directories exist
 	readonly DIRECTORIES=(
@@ -69,9 +70,9 @@ omw_init_globals() {
 	return 0
 }
 
-_omw_common_validate_config() {
+_omw_common_validate_software_config() {
 	local errors=0
-	local name version versions_str key url build_cmd deps dep dep_name dep_version app alias package_name bin_name node_version
+	local name version versions_str key url build_cmd deps dep dep_name dep_version excluded
 	local placeholder="${OMW_NONE:--}"
 
 	for name in "${SOFTWARE_LIST[@]}"; do
@@ -136,6 +137,21 @@ _omw_common_validate_config() {
 		done
 	done
 
+	for excluded in "${SOFTWARE_BUILD_ALL_EXCLUDES[@]}"; do
+		if ! omw_contains_word "$excluded" "${SOFTWARE_LIST[*]}"; then
+			omw_log "SOFTWARE_BUILD_ALL_EXCLUDES includes '$excluded' but it is not declared in SOFTWARE_LIST." "ERROR"
+			((++errors))
+		fi
+	done
+
+	return "$errors"
+}
+
+_omw_common_validate_app_config() {
+	local errors=0
+	local app
+	local placeholder="${OMW_NONE:--}"
+
 	for app in "${APP_LIST[@]}"; do
 		if [[ "$app" == "$placeholder" ]]; then
 			omw_log "APP_LIST contains the empty-field placeholder." "ERROR"
@@ -170,6 +186,14 @@ _omw_common_validate_config() {
 			((++errors))
 		fi
 	done
+
+	return "$errors"
+}
+
+_omw_common_validate_node_config() {
+	local errors=0
+	local alias package_name version bin_name node_version
+	local placeholder="${OMW_NONE:--}"
 
 	validate_node_package_version() {
 		local label="$1"
@@ -229,10 +253,57 @@ _omw_common_validate_config() {
 		validate_node_version_ref "NODE_CACHE_PACKAGE_NODE_VERSIONS[$alias]" "$node_version"
 	done
 
+	return "$errors"
+}
+
+_omw_common_validate_config() {
+	local errors=0
+
+	_omw_common_validate_software_config || errors=$((errors + $?))
+	_omw_common_validate_app_config || errors=$((errors + $?))
+	_omw_common_validate_node_config || errors=$((errors + $?))
+
 	if ((errors > 0)); then
 		omw_log "Configuration validation failed with $errors error(s)." "ERROR"
 		exit 1
 	fi
+}
+
+omw_software_prefix() {
+	local name="$1"
+	local version="$2"
+	printf '%s/%s/%s-%s' "$SOFTWARE_INSTALL_PATH" "$name" "$name" "$version"
+}
+
+omw_software_modulefile() {
+	local name="$1"
+	local version="$2"
+	printf '%s/%s/%s-%s' "$MODULEFILES_PATH" "$name" "$name" "$version"
+}
+
+omw_software_package_path() {
+	local name="$1"
+	local version="$2"
+	local url
+	url=$(omw_get_software_url "$name" "$version")
+	[[ -z "$url" ]] && return 1
+	printf '%s/software/%s' "$PACKAGES_PATH" "$(basename "$url")"
+}
+
+omw_app_install_dir() {
+	local app="$1"
+	local version="$2"
+	printf '%s/%s-%s' "$APPS_INSTALL_PATH" "$app" "$version"
+}
+
+omw_app_package_path() {
+	local url="$1"
+	printf '%s/apps/%s' "$PACKAGES_PATH" "$(basename "$url")"
+}
+
+omw_software_build_all_enabled() {
+	local name="$1"
+	! omw_contains_word "$name" "${SOFTWARE_BUILD_ALL_EXCLUDES[*]:-}"
 }
 
 omw_check_sys_deps() {

@@ -245,27 +245,6 @@ _omw_status_ui_section() {
 	printf '%*s\n' "${#title}" "" | tr ' ' '-'
 }
 
-omw_software_prefix() {
-	local name="$1"
-	local version="$2"
-	printf '%s/%s/%s-%s' "$SOFTWARE_INSTALL_PATH" "$name" "$name" "$version"
-}
-
-omw_software_modulefile() {
-	local name="$1"
-	local version="$2"
-	printf '%s/%s/%s-%s' "$MODULEFILES_PATH" "$name" "$name" "$version"
-}
-
-omw_software_package_path() {
-	local name="$1"
-	local version="$2"
-	local url
-	url=$(omw_get_software_url "$name" "$version")
-	[[ -z "$url" ]] && return 1
-	printf '%s/software/%s' "$PACKAGES_PATH" "$(basename "$url")"
-}
-
 _omw_status_software_install_status() {
 	local name="$1"
 	local version="$2"
@@ -275,29 +254,6 @@ _omw_status_software_install_status() {
 	if [[ -d "$prefix" && -f "$modulefile" ]]; then
 		printf 'installed'
 	elif [[ -d "$prefix" || -f "$modulefile" ]]; then
-		printf 'partial'
-	else
-		printf 'available'
-	fi
-}
-
-omw_app_install_status() {
-	local app="$1"
-	local version="${APP_VERSIONS[$app]}"
-	local exec_name="${APP_EXECUTABLE_NAME[$app]}"
-	local bin_dirs="${APP_BIN_DIRS[$app]:-}"
-	local install_dir="$APPS_INSTALL_PATH/$app-$version"
-	local symlink_path="$SCRIPTS_BIN_PATH/$exec_name"
-
-	if [[ "$app" == "hack-nerd-font" ]]; then
-		omw_hack_nerd_font_installed && printf 'installed' || printf 'available'
-	elif [[ "$exec_name" == "special" ]]; then
-		[[ -d "$HOME/.autojump" || -d "$install_dir" ]] && printf 'installed' || printf 'available'
-	elif [[ -n "$bin_dirs" ]]; then
-		_omw_app_bin_dir_install_status "$app" "$install_dir"
-	elif [[ -L "$symlink_path" && -d "$install_dir" ]]; then
-		printf 'installed'
-	elif [[ -L "$symlink_path" || -d "$install_dir" ]]; then
 		printf 'partial'
 	else
 		printf 'available'
@@ -379,7 +335,7 @@ omw_print_status() {
 		fi
 		status=$(omw_app_install_status "$name")
 		[[ "$show_all" == "false" && "$status" != "installed" && "$status" != "partial" ]] && continue
-		pkg="$PACKAGES_PATH/apps/$(basename "$url")"
+		pkg=$(omw_app_package_path "$url")
 		[[ -f "$pkg" ]] && pkg="cached" || pkg="needed"
 		cmd="./omw --install $name"
 		printf '%-14s %-14s %-12s %-10s %s\n' "$name" "$version" "$(_omw_status_ui_status "$status")" "$pkg" "$cmd"
@@ -397,7 +353,7 @@ omw_print_status() {
 		fi
 		status=$(omw_node_package_status "$name")
 		[[ "$show_all" == "false" && "$status" != "installed" && "$status" != "partial" ]] && continue
-		if _omw_node_cache_ready || _omw_node_cache_archive_ready; then
+		if omw_node_cache_available; then
 			pkg="cached"
 		else
 			pkg="needed"
@@ -414,7 +370,7 @@ omw_print_status() {
 		fi
 		status=$(omw_node_cache_package_status "$name")
 		[[ "$show_all" == "false" && "$status" != "cached" ]] && continue
-		if _omw_node_cache_ready || _omw_node_cache_archive_ready; then
+		if omw_node_cache_available; then
 			pkg="cached"
 		else
 			pkg="needed"
@@ -424,7 +380,7 @@ omw_print_status() {
 
 	_omw_status_ui_section "Shell configs"
 	printf '%-14s %-14s %-12s %s\n' "Name" "Target" "State" "Command"
-	for name in tmux vim zsh; do
+	for name in "${CONFIG_TARGET_LIST[@]}"; do
 		status=$(_omw_status_config_install_status "$name")
 		[[ "$show_all" == "false" && "$status" != "installed" && "$status" != "partial" ]] && continue
 		printf '%-14s %-14s %-12s %s\n' "$name" "$name" "$(_omw_status_ui_status "$status")" "./omw --config $name"

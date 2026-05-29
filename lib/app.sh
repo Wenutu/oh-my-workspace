@@ -172,6 +172,30 @@ omw_hack_nerd_font_installed() {
 	[[ -d "$HOME/.local/share/fonts/OMW/HackNerdFont" || -d "$HOME/.fonts/OMW/HackNerdFont" ]]
 }
 
+omw_app_install_status() {
+	local app="$1"
+	local version="${APP_VERSIONS[$app]}"
+	local exec_name="${APP_EXECUTABLE_NAME[$app]}"
+	local bin_dirs="${APP_BIN_DIRS[$app]:-}"
+	local install_dir
+	install_dir=$(omw_app_install_dir "$app" "$version")
+	local symlink_path="$SCRIPTS_BIN_PATH/$exec_name"
+
+	if [[ "$app" == "hack-nerd-font" ]]; then
+		omw_hack_nerd_font_installed && printf 'installed' || printf 'available'
+	elif [[ "$exec_name" == "special" ]]; then
+		[[ -d "$HOME/.autojump" || -d "$install_dir" ]] && printf 'installed' || printf 'available'
+	elif [[ -n "$bin_dirs" ]]; then
+		_omw_app_bin_dir_install_status "$app" "$install_dir"
+	elif [[ -L "$symlink_path" && -d "$install_dir" ]]; then
+		printf 'installed'
+	elif [[ -L "$symlink_path" || -d "$install_dir" ]]; then
+		printf 'partial'
+	else
+		printf 'available'
+	fi
+}
+
 _omw_app_install_hack-nerd-font() {
 	local appname="$1"
 	local install_dir="$2"
@@ -222,9 +246,10 @@ omw_install_app() {
 		omw_log "Unknown app or incomplete app definition: $appname" "ERROR"
 		return 1
 	fi
-	local install_dir="$APPS_INSTALL_PATH/$appname-$version"
+	local install_dir
+	install_dir=$(omw_app_install_dir "$appname" "$version")
 	local pkg_path
-	pkg_path="$PACKAGES_PATH/apps/$(basename "$url")"
+	pkg_path=$(omw_app_package_path "$url")
 	local bin_dirs="${APP_BIN_DIRS[$appname]:-}"
 	local symlink_path="$SCRIPTS_BIN_PATH/$exec_name"
 	local backup_dir=""

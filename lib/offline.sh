@@ -1,26 +1,6 @@
 # shellcheck shell=bash
 # Public functions in this file use the omw_* prefix.
 # Private helpers use _omw_offline_*.
-_omw_offline_get_gcc_prereq_pkgs() {
-	local extracted_gcc_path="$1"
-	local prereq_script="$extracted_gcc_path/contrib/download_prerequisites"
-
-	if [[ ! -f "$prereq_script" ]]; then
-		omw_log "download_prerequisites script not found in $extracted_gcc_path" "ERROR"
-		return 1
-	fi
-	# Use an array to store results, which handles potential future changes better
-	local prereqs=(
-		"$(grep -oP 'gmp-.*tar\.bz2' "$prereq_script" | head -1 || true)"
-		"$(grep -oP 'mpfr-.*tar\.bz2' "$prereq_script" | head -1 || true)"
-		"$(grep -oP 'mpc-.*tar\.gz' "$prereq_script" | head -1 || true)"
-		"$(grep -oP 'isl-.*tar\.bz2' "$prereq_script" | head -1 || true)"
-	)
-	# Print non-empty package names
-	for pkg in "${prereqs[@]}"; do
-		[[ -n "$pkg" ]] && echo "$pkg"
-	done
-}
 
 # Prefetch GCC prerequisites for all defined versions
 _omw_offline_prefetch_gcc_prereqs() {
@@ -33,7 +13,7 @@ _omw_offline_prefetch_gcc_prereqs() {
 		local url
 		url=$(omw_get_software_url "gcc" "$version")
 		local gcc_pkg
-		gcc_pkg="$PACKAGES_PATH/software/$(basename "$url")"
+		gcc_pkg=$(omw_software_package_path "gcc" "$version")
 		local tmp_dir="$BUILDS_PATH/.prefetch-gcc-$version"
 
 		# Ensure GCC main package is downloaded
@@ -49,7 +29,7 @@ _omw_offline_prefetch_gcc_prereqs() {
 		fi
 
 		local prereq_pkgs
-		mapfile -t prereq_pkgs < <(_omw_offline_get_gcc_prereq_pkgs "$tmp_dir")
+		mapfile -t prereq_pkgs < <(omw_gcc_prereq_packages "$tmp_dir")
 
 		for pkg in "${prereq_pkgs[@]}"; do
 			local dest="$PACKAGES_PATH/software/$pkg"
@@ -112,7 +92,7 @@ omw_verify_offline() {
 			url=$(omw_get_software_url "$sw" "$version")
 			[[ -z "$url" ]] && continue
 			local p
-			p="$PACKAGES_PATH/software/$(basename "$url")"
+			p=$(omw_software_package_path "$sw" "$version")
 			verify_package "$p"
 		done
 	done
@@ -121,13 +101,13 @@ omw_verify_offline() {
 		local url="${APP_URLS[$app]}"
 		[[ -z "$url" ]] && continue
 		local p
-		p="$PACKAGES_PATH/apps/$(basename "$url")"
+		p=$(omw_app_package_path "$url")
 		verify_package "$p"
 
 		local source_url="${APP_SOURCE_URLS[$app]:-}"
 		[[ -z "$source_url" ]] && continue
 		local source_p
-		source_p="$PACKAGES_PATH/apps/$(basename "$source_url")"
+		source_p=$(omw_app_package_path "$source_url")
 		verify_package "$source_p"
 	done
 
@@ -135,17 +115,15 @@ omw_verify_offline() {
 	local gcc_versions_str="${SOFTWARE_VERSIONS[gcc]}"
 	if [[ -n "$gcc_versions_str" ]]; then
 		for version in $gcc_versions_str; do
-			local gcc_url
-			gcc_url=$(omw_get_software_url "gcc" "$version")
 			local gcc_pkg
-			gcc_pkg="$PACKAGES_PATH/software/$(basename "$gcc_url")"
+			gcc_pkg=$(omw_software_package_path "gcc" "$version")
 
 			if [[ -f "$gcc_pkg" ]]; then
 				local tmp_dir="$BUILDS_PATH/.verify-gcc-prereqs-$version"
 				omw_safe_rm_rf "$tmp_dir"
 				if omw_extract_package "$gcc_pkg" "$tmp_dir" 1; then
 					local prereq_pkgs
-					mapfile -t prereq_pkgs < <(_omw_offline_get_gcc_prereq_pkgs "$tmp_dir")
+					mapfile -t prereq_pkgs < <(omw_gcc_prereq_packages "$tmp_dir")
 					omw_safe_rm_rf "$tmp_dir"
 					for pkg in "${prereq_pkgs[@]}"; do
 						local p="$PACKAGES_PATH/software/$pkg"
@@ -165,16 +143,17 @@ omw_verify_offline() {
 	verify_package "$PACKAGES_PATH/rpms.tar.gz"
 
 	# 4) Config packages required for offline fallback-free shell setup
-	for cfg in tmux zsh; do
-		verify_package "$PACKAGES_PATH/config/$cfg.tar.gz"
+	local cfg cfg_package
+	for cfg in "${CONFIG_TARGET_LIST[@]}"; do
+		cfg_package=$(omw_config_package_path "$cfg")
+		if [[ "$cfg" == "vim" && ! -f "$cfg_package" ]]; then
+			omw_log "Optional Vim config package not found; Vim config will be skipped offline." "WARN"
+			continue
+		fi
+		verify_package "$cfg_package"
 	done
-	if [[ ! -f "$PACKAGES_PATH/config/vim.tar.gz" ]]; then
-		omw_log "Optional Vim config package not found; Vim config will be skipped offline." "WARN"
-	else
-		verify_package "$PACKAGES_PATH/config/vim.tar.gz"
-	fi
 
-	if _omw_node_has_any_packages; then
+	if omw_node_has_any_packages; then
 		verify_package "$PACKAGES_PATH/node/npm-cache.tar.gz"
 	fi
 	if ! omw_node_verify "temp"; then
@@ -194,46 +173,12 @@ omw_verify_offline() {
 	omw_log "Offline assets look complete." "SUCCESS"
 }
 
-_omw_offline_config_package_path() {
-	local target="$1"
-	printf '%s/config/%s.tar.gz' "$PACKAGES_PATH" "$target"
-}
-
-_omw_offline_config_required_path() {
-	local target="$1"
-
-	case "$target" in
-	tmux)
-		printf '%s/tmux/.tmux' "$CONFIG_PATH"
-		;;
-	vim)
-		printf '%s/vim/vim9' "$CONFIG_PATH"
-		;;
-	zsh)
-		printf '%s/zsh/.oh-my-zsh' "$CONFIG_PATH"
-		;;
-	*)
-		printf '%s/%s' "$CONFIG_PATH" "$target"
-		;;
-	esac
-}
-
-omw_config_ready_for_package() {
-	local target="$1"
-	local required_path first_entry
-	required_path=$(_omw_offline_config_required_path "$target")
-
-	[[ -d "$required_path" ]] || return 1
-	first_entry=$(find "$required_path" -mindepth 1 -print -quit)
-	[[ -n "$first_entry" ]]
-}
-
 _omw_offline_package_config() {
 	local target="$1"
 	local required_path
 	local package_path
-	required_path=$(_omw_offline_config_required_path "$target")
-	package_path=$(_omw_offline_config_package_path "$target")
+	required_path=$(omw_config_required_path "$target")
+	package_path=$(omw_config_package_path "$target")
 	omw_ensure_valid_cwd
 
 	if [[ -f "$package_path" ]]; then
@@ -264,61 +209,9 @@ _omw_offline_package_config() {
 
 _omw_offline_package_all_configs() {
 	local cfg
-	for cfg in tmux vim zsh; do
+	for cfg in "${CONFIG_TARGET_LIST[@]}"; do
 		_omw_offline_package_config "$cfg" || return 1
 	done
-}
-
-omw_restore_config_package() {
-	local target="$1"
-	local required_path="$2"
-	local force="${3:-false}"
-	local package_path target_dir backup_dir first_entry has_conflict=false
-	package_path=$(_omw_offline_config_package_path "$target")
-	target_dir="$CONFIG_PATH/$target"
-
-	if [[ ! -f "$package_path" ]]; then
-		return 0
-	fi
-
-	omw_log "Restoring $target config from $package_path" "INFO"
-	mkdir -p "$CONFIG_PATH"
-	if [[ -e "$target_dir" || -L "$target_dir" ]]; then
-		if [[ -L "$target_dir" || ! -d "$target_dir" ]]; then
-			has_conflict=true
-		else
-			first_entry=$(find "$target_dir" -mindepth 1 -print -quit)
-			[[ -n "$first_entry" ]] && has_conflict=true
-		fi
-		if [[ "$has_conflict" == "true" && "$force" != "true" ]]; then
-			omw_log "$target config directory already exists: $target_dir" "WARN"
-			omw_log "Skipping package restore. Delete the existing config directory or rerun with --force to overwrite it." "WARN"
-			return 0
-		fi
-		if [[ "$has_conflict" == "true" ]]; then
-			backup_dir=$(_omw_common_backup_path_once "$target_dir" "$target")
-			omw_safe_rm_rf "$target_dir"
-			[[ -n "$backup_dir" ]] && omw_log "Existing $target config was replaced by package; backup: $backup_dir" "INFO"
-		fi
-	fi
-	if ! tar -xzf "$package_path" -C "$CONFIG_PATH"; then
-		omw_log "Failed to restore $target config package." "ERROR"
-		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
-			omw_safe_rm_rf "$target_dir"
-			cp -a "$backup_dir" "$target_dir"
-			omw_log "Restored previous $target config from $backup_dir" "WARN"
-		fi
-		return 1
-	fi
-	if [[ ! -d "$required_path" ]]; then
-		omw_log "Config package did not restore expected directory: $required_path" "ERROR"
-		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
-			omw_safe_rm_rf "$target_dir"
-			cp -a "$backup_dir" "$target_dir"
-			omw_log "Restored previous $target config from $backup_dir" "WARN"
-		fi
-		return 1
-	fi
 }
 
 omw_create_offline_bundle() {
@@ -332,17 +225,17 @@ omw_create_offline_bundle() {
 		for version in $versions_str; do
 			local url
 			url=$(omw_get_software_url "$app" "$version")
-			if [[ -n "$url" ]] && ! omw_download_package "$url" "$PACKAGES_PATH/software/$(basename "$url")"; then
+			if [[ -n "$url" ]] && ! omw_download_package "$url" "$(omw_software_package_path "$app" "$version")"; then
 				return 1
 			fi
 		done
 	done
 	for app in "${APP_LIST[@]}"; do
-		if ! omw_download_package "${APP_URLS[$app]}" "$PACKAGES_PATH/apps/$(basename "${APP_URLS[$app]}")"; then
+		if ! omw_download_package "${APP_URLS[$app]}" "$(omw_app_package_path "${APP_URLS[$app]}")"; then
 			return 1
 		fi
 		local source_url="${APP_SOURCE_URLS[$app]:-}"
-		if [[ -n "$source_url" ]] && ! omw_download_package "$source_url" "$PACKAGES_PATH/apps/$(basename "$source_url")"; then
+		if [[ -n "$source_url" ]] && ! omw_download_package "$source_url" "$(omw_app_package_path "$source_url")"; then
 			return 1
 		fi
 	done

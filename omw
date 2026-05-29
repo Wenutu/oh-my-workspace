@@ -8,7 +8,7 @@ fi
 
 OMW_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-declare -a SOFTWARE_LIST APP_LIST NODE_PACKAGE_LIST NODE_CACHE_PACKAGE_LIST CONFIG_BACKUP_PATHS
+declare -a SOFTWARE_LIST SOFTWARE_BUILD_ALL_EXCLUDES APP_LIST NODE_PACKAGE_LIST NODE_CACHE_PACKAGE_LIST CONFIG_BACKUP_PATHS CONFIG_TARGET_LIST
 declare -A SOFTWARE_VERSIONS SOFTWARE_URLS SOFTWARE_DEPS SOFTWARE_CONFIG_CMDS SOFTWARE_CFLAGS SOFTWARE_LDFLAGS
 declare -A APP_VERSIONS APP_URLS APP_EXECUTABLE_NAME APP_SOURCE_URLS APP_BIN_DIRS
 declare -A NODE_PACKAGE_NAMES NODE_PACKAGE_VERSIONS NODE_PACKAGE_BINS NODE_PACKAGE_NODE_VERSIONS
@@ -68,8 +68,8 @@ _omw_cli_print_help() {
 		  node install-all                Install all declared global npm packages
 
 		Config:
-		  config <tmux|vim|zsh>           Apply one shell/editor config
-		  config all                      Apply tmux, vim, and zsh configs
+		  config <target>                 Apply one shell/editor config
+		  config all                      Apply all configured shell/editor configs
 		  init                            Add OMW env sourcing to ~/.bashrc
 		  --config, -c <target>           Legacy alias for config
 
@@ -106,7 +106,9 @@ _omw_cli_print_help() {
 		  $0 status installed
 
 		Software to build: ${SOFTWARE_LIST[*]}
+		Manual build only: ${SOFTWARE_BUILD_ALL_EXCLUDES[*]:-(none)}
 		Apps to install: ${APP_LIST[*]}
+		Config targets: ${CONFIG_TARGET_LIST[*]}
 			Node packages: ${NODE_PACKAGE_LIST[*]}
 			Node cache-only packages: ${NODE_CACHE_PACKAGE_LIST[*]}
 		EOF
@@ -324,8 +326,13 @@ _omw_cli_require_target() {
 }
 
 _omw_cli_run_build_all() {
-	local sw version versions_str count=0
+	local sw version versions_str count=0 skipped=0
 	for sw in "${SOFTWARE_LIST[@]}"; do
+		if ! omw_software_build_all_enabled "$sw"; then
+			((++skipped))
+			omw_log "Skipping manual-only build target: $sw" "INFO"
+			continue
+		fi
 		versions_str="${SOFTWARE_VERSIONS[$sw]}"
 		[[ -z "$versions_str" ]] && continue
 		for version in $versions_str; do
@@ -340,6 +347,9 @@ _omw_cli_run_build_all() {
 		omw_log "No source build targets are defined in packages.sh." "ERROR"
 		exit 1
 	fi
+	if ((skipped > 0)); then
+		omw_log "Skipped $skipped manual-only source build target(s). Build them explicitly when needed." "INFO"
+	fi
 }
 
 _omw_cli_run_all() {
@@ -348,7 +358,7 @@ _omw_cli_run_all() {
 	omw_log "Phase 1/4: build source software (${#SOFTWARE_LIST[@]} package definitions)" "INFO"
 	_omw_cli_run_build_all
 	omw_log "Phase 2/4: apply configs" "INFO"
-	for app in tmux vim zsh; do omw_configure "$app" "$OMW_FORCE" || exit 1; done
+	for app in "${CONFIG_TARGET_LIST[@]}"; do omw_configure "$app" "$OMW_FORCE" || exit 1; done
 	omw_log "Phase 3/4: install prebuilt apps (${#APP_LIST[@]} app definitions)" "INFO"
 	for app in "${APP_LIST[@]}"; do omw_install_app "$app" "$OMW_FORCE" || exit 1; done
 	omw_log "Phase 4/4: install Node global packages (${#NODE_PACKAGE_LIST[@]} package definitions)" "INFO"
@@ -385,19 +395,19 @@ _omw_cli_run_build() {
 _omw_cli_run_config() {
 	local target="$1"
 
-	_omw_cli_require_target "config" "$target" "Use: $0 config tmux, vim, zsh, or all."
+	_omw_cli_require_target "config" "$target" "Use: $0 config <${CONFIG_TARGET_LIST[*]}> or all."
 	case "$target" in
 	all)
-		omw_configure "tmux" "$OMW_FORCE" || exit 1
-		omw_configure "vim" "$OMW_FORCE" || exit 1
-		omw_configure "zsh" "$OMW_FORCE" || exit 1
-		;;
-	tmux | vim | zsh)
-		omw_configure "$target" "$OMW_FORCE" || exit 1
+		local cfg
+		for cfg in "${CONFIG_TARGET_LIST[@]}"; do omw_configure "$cfg" "$OMW_FORCE" || exit 1; done
 		;;
 	*)
-		omw_log "Invalid config target. Use: tmux, vim, zsh, all." "ERROR"
-		exit 1
+		if omw_contains_word "$target" "${CONFIG_TARGET_LIST[*]}"; then
+			omw_configure "$target" "$OMW_FORCE" || exit 1
+		else
+			omw_log "Invalid config target. Use: ${CONFIG_TARGET_LIST[*]}, all." "ERROR"
+			exit 1
+		fi
 		;;
 	esac
 }

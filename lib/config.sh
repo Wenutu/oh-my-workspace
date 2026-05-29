@@ -62,6 +62,100 @@ _omw_config_skip_existing_dir_without_force() {
 	return 1
 }
 
+_omw_config_package_path() {
+	local target="$1"
+	printf '%s/config/%s.tar.gz' "$PACKAGES_PATH" "$target"
+}
+
+_omw_config_required_path() {
+	local target="$1"
+
+	case "$target" in
+	tmux)
+		printf '%s/tmux/.tmux' "$CONFIG_PATH"
+		;;
+	vim)
+		printf '%s/vim/vim9' "$CONFIG_PATH"
+		;;
+	zsh)
+		printf '%s/zsh/.oh-my-zsh' "$CONFIG_PATH"
+		;;
+	*)
+		printf '%s/%s' "$CONFIG_PATH" "$target"
+		;;
+	esac
+}
+
+omw_config_package_path() {
+	_omw_config_package_path "$1"
+}
+
+omw_config_required_path() {
+	_omw_config_required_path "$1"
+}
+
+omw_config_ready_for_package() {
+	local target="$1"
+	local required_path first_entry
+	required_path=$(_omw_config_required_path "$target")
+
+	[[ -d "$required_path" ]] || return 1
+	first_entry=$(find "$required_path" -mindepth 1 -print -quit)
+	[[ -n "$first_entry" ]]
+}
+
+omw_restore_config_package() {
+	local target="$1"
+	local required_path="$2"
+	local force="${3:-false}"
+	local package_path target_dir backup_dir first_entry has_conflict=false
+	package_path=$(_omw_config_package_path "$target")
+	target_dir="$CONFIG_PATH/$target"
+
+	if [[ ! -f "$package_path" ]]; then
+		return 0
+	fi
+
+	omw_log "Restoring $target config from $package_path" "INFO"
+	mkdir -p "$CONFIG_PATH"
+	if [[ -e "$target_dir" || -L "$target_dir" ]]; then
+		if [[ -L "$target_dir" || ! -d "$target_dir" ]]; then
+			has_conflict=true
+		else
+			first_entry=$(find "$target_dir" -mindepth 1 -print -quit)
+			[[ -n "$first_entry" ]] && has_conflict=true
+		fi
+		if [[ "$has_conflict" == "true" && "$force" != "true" ]]; then
+			omw_log "$target config directory already exists: $target_dir" "WARN"
+			omw_log "Skipping package restore. Delete the existing config directory or rerun with --force to overwrite it." "WARN"
+			return 0
+		fi
+		if [[ "$has_conflict" == "true" ]]; then
+			backup_dir=$(_omw_common_backup_path_once "$target_dir" "$target")
+			omw_safe_rm_rf "$target_dir"
+			[[ -n "$backup_dir" ]] && omw_log "Existing $target config was replaced by package; backup: $backup_dir" "INFO"
+		fi
+	fi
+	if ! tar -xzf "$package_path" -C "$CONFIG_PATH"; then
+		omw_log "Failed to restore $target config package." "ERROR"
+		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
+			omw_safe_rm_rf "$target_dir"
+			cp -a "$backup_dir" "$target_dir"
+			omw_log "Restored previous $target config from $backup_dir" "WARN"
+		fi
+		return 1
+	fi
+	if [[ ! -d "$required_path" ]]; then
+		omw_log "Config package did not restore expected directory: $required_path" "ERROR"
+		if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
+			omw_safe_rm_rf "$target_dir"
+			cp -a "$backup_dir" "$target_dir"
+			omw_log "Restored previous $target config from $backup_dir" "WARN"
+		fi
+		return 1
+	fi
+}
+
 ###############################################################################
 # Post-Install & Packaging
 ###############################################################################
