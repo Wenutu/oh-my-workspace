@@ -1,0 +1,20 @@
+# directory|repository|optional branch
+auto-pairs|https://github.com/jiangmiao/auto-pairs.git|
+autoHEADER|https://github.com/Wenutu/autoHEADER.git|
+coc.nvim|https://github.com/neoclide/coc.nvim.git|release
+fzf|https://github.com/junegunn/fzf.git|
+fzf.vim|https://github.com/junegunn/fzf.vim.git|
+indentline|https://github.com/yggdroot/indentline.git|
+nerdcommenter|https://github.com/preservim/nerdcommenter.git|
+nerdtree|https://github.com/preservim/nerdtree.git|
+rainbow|https://github.com/luochen1990/rainbow.git|
+seoul256.vim|https://github.com/junegunn/seoul256.vim.git|
+tagbar|https://github.com/preservim/tagbar.git|
+vim-airline|https://github.com/vim-airline/vim-airline.git|
+vim-cursorword|https://github.com/itchyny/vim-cursorword.git|
+vim-easy-align|https://github.com/junegunn/vim-easy-align.git|
+vim-matchup|https://github.com/andymass/vim-matchup.git|
+vim-multiple-cursors|https://github.com/terryma/vim-multiple-cursors.git|
+vim-snippets|https://github.com/honza/vim-snippets.git|
+vim-verilog-mode|https://github.com/Wenutu/vim-verilog-mode.git|
+visincr|https://github.com/vim-scripts/VisIncr.git|

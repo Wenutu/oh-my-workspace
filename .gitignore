@@ -1,0 +1,59 @@
+# ==========================================
+# 1. Ingore by default
+# ==========================================
+*.tar.gz
+/packages/
+/builds/
+/apps/
+/backups/
+/bin/
+/tools/
+/scripts/
+/bak/
+/tests/
+
+/lib/**/*
+!/lib/*
+
+# ==========================================
+# 2. Config files (whitelist)
+# ==========================================
+
+# 1. Ignore everything under /config by default
+/config/*
+
+# 2. Explicitly allow only the required top-level directories
+!/config/tmux/
+!/config/vim/
+!/config/zsh/
+
+# ------------------------------------------
+# tmux configuration
+# ------------------------------------------
+# Ignore everything in tmux except the specified file
+/config/tmux/*
+!/config/tmux/tmux.default
+
+# ------------------------------------------
+# zsh configuration
+# ------------------------------------------
+# Ignore everything in zsh except the specified file
+/config/zsh/*
+!/config/zsh/zshrc.default
+
+# ------------------------------------------
+# vim configuration
+# ------------------------------------------
+# Ignore everything in vim except the specified files/directories
+/config/vim/*
+!/config/vim/plugins.list
+!/config/vim/vimrc.default
+
+# Allow coc directory and manage its contents
+!/config/vim/coc/
+/config/vim/coc/*
+!/config/vim/coc/coc-settings.json
+!/config/vim/coc/extensions.list
+
+# Allow ultisnips directory and all files inside it
+!/config/vim/coc/ultisnips/

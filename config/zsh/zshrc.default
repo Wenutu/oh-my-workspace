@@ -1,0 +1,214 @@
+# Add OMW-managed Zsh customizations here.
+################################################################################
+#                           0. Environment Variables                           #
+################################################################################
+# set language
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+
+export EDITOR='gvim'
+
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+
+################################################################################
+#                            1. Environment Modules                            #
+################################################################################
+# Source environment-modules if available
+if [[ -f /etc/profile.d/modules.sh ]]; then
+	source /etc/profile.d/modules.sh
+elif [[ -f /utils/Modules/init/zsh ]]; then
+    source /utils/Modules/init/zsh
+fi
+
+if command -v module &>/dev/null; then
+    module purge
+    module load -s zsh
+    module load -s vim
+    module load -s node
+    module load -s tmux
+    module load -s ctags
+fi
+
+################################################################################
+#                                2. Zsh Options                                #
+################################################################################
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=10000
+SAVEHIST=10000
+DISABLE_AUTO_TITLE="true"
+
+# History options
+unsetopt SHARE_HISTORY
+setopt APPEND_HISTORY
+setopt INC_APPEND_HISTORY
+setopt HIST_IGNORE_DUPS
+setopt HIST_IGNORE_SPACE
+
+# Completion options
+autoload -Uz compinit && compinit
+zstyle ':completion:*' menu select
+
+################################################################################
+#                             3. Custom Functions                              #
+################################################################################
+function cd() {
+    builtin cd "$@" && builtin pwd
+}
+
+function cdls() {
+    builtin cd "$@" && builtin ls -lh
+}
+
+function extract() {
+    if [ -f "$1" ]; then
+        case $1 in
+        *.tar.bz2) tar xjf "$1" ;;
+        *.tar.gz) tar xzf "$1" ;;
+        *.bz2) bunzip2 "$1" ;;
+        *.rar) unrar x "$1" ;;
+        *.gz) gunzip "$1" ;;
+        *.tar) tar xf "$1" ;;
+        *.tbz2) tar xjf "$1" ;;
+        *.tgz) tar xzf "$1" ;;
+        *.zip) unzip "$1" ;;
+        *.Z) uncompress $1 ;;
+        *.7z) 7z x "$1" ;;
+        *) echo "'$1' cannot be extracted via extract()" ;;
+        esac
+    else
+        echo "'$1' is not a valid file"
+    fi
+}
+
+function y() {
+    local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+    command yazi "$@" --cwd-file="$tmp"
+    IFS= read -r -d '' cwd <"$tmp"
+    [ "$cwd" != "$PWD" ] && [ -d "$cwd" ] && builtin cd -- "$cwd"
+    command rm -f -- "$tmp"
+}
+
+# svn - Improved implementation with better error handling and performance
+function mslock() {
+    local repo_url
+    repo_url=$(svn info 2>/dev/null | grep "^URL:" | cut -d' ' -f2) || {
+        echo "Error: Not in SVN repository"
+        return 1
+    }
+
+    local files
+    files=$(svn ls -R "$repo_url" 2>/dev/null | grep -v '/$') || {
+        echo "Error: Failed to list files"
+        return 1
+    }
+
+    echo "$files" | xargs -I {} svn lock --force "$repo_url/{}" 2>/dev/null
+    echo "Locked $(echo "$files" | wc -l) files"
+}
+
+function msunlock() {
+    local repo_url
+    repo_url=$(svn info 2>/dev/null | grep "^URL:" | cut -d' ' -f2) || {
+        echo "Error: Not in SVN repository"
+        return 1
+    }
+
+    local files
+    files=$(svn ls -R "$repo_url" 2>/dev/null | grep -v '/$') || {
+        echo "Error: Failed to list files"
+        return 1
+    }
+
+    echo "$files" | xargs -I {} svn unlock --force "$repo_url/{}" 2>/dev/null
+    echo "Unlocked $(echo "$files" | wc -l) files"
+}
+
+function msurl() {
+    local modified_files
+    modified_files=($(svn st 2>/dev/null | awk '/^M/ {print $2}'))
+
+    if [ ${#modified_files[@]} -eq 0 ]; then
+        echo "No modified files found"
+        return 1
+    fi
+
+    # Get URLs in a single batch query
+    svn info "${modified_files[@]}" 2>/dev/null | awk '/^Path:|^URL:/ {
+        if (/^Path:/) path=$0; 
+        if (/^URL:/) print path "\n  -> " $0
+    }' | sed 's/Path: //' | sed 's/URL: //'
+}
+
+function mspath() {
+    local modified_files
+    modified_files=($(svn st 2>/dev/null | awk '/^M/ {print $2}'))
+
+    if [ ${#modified_files[@]} -eq 0 ]; then
+        echo "No modified files found"
+        return 1
+    fi
+
+    printf '%s\n' "${modified_files[@]}" | xargs -I {} realpath "{}"
+}
+
+function msdpath() {
+    local deleted_files
+    deleted_files=($(svn st 2>/dev/null | awk '/^!/ {print $2}'))
+
+    if [ ${#deleted_files[@]} -eq 0 ]; then
+        echo "No deleted files found"
+        return 1
+    fi
+
+    printf '%s\n' "${deleted_files[@]}" | xargs -I {} realpath "{}"
+}
+
+################################################################################
+#                                  4. Aliases                                  #
+################################################################################
+alias zshconfig="$EDITOR ~/.zshrc"
+alias sc="source ~/.zshrc"
+
+alias g="gvim"
+alias gd="gvimdiff"
+
+################################################################################
+#                                  5. Scripts                                  #
+################################################################################
+# Autojump
+[[ -f "$HOME/.autojump/etc/profile.d/autojump.sh" ]] && source "$HOME/.autojump/etc/profile.d/autojump.sh"
+
+# FZF - Fuzzy Finder
+if command -v fzf &>/dev/null; then
+    eval "$(fzf --zsh)"
+
+    # Search configuration
+    export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git --exclude .svn --exclude .idea --exclude .vscode'
+    export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git --exclude .svn --exclude .idea'
+
+    # Main options - simple and elegant
+    export FZF_DEFAULT_OPTS="
+        --height 60%
+        --reverse
+        --border rounded
+        --info inline
+        --preview-window right:50%:rounded
+        --preview 'bat --color=always {} 2>/dev/null || cat {} 2>/dev/null || ls -la {} 2>/dev/null'
+        --color 'fg:#d0d0d0,bg:#1e1e1e,hl:#00ff00'
+        --color 'fg+:#ffffff,bg+:#2a2a2a,hl+:#00ff00'
+        --color 'info:#808080,prompt:#00ff00,pointer:#ff0000'
+        --multi
+        --bind 'ctrl-/:toggle-preview,ctrl-a:select-all,ctrl-d:deselect-all'
+    "
+
+    # Completion options
+    export FZF_COMPLETION_TRIGGER='**'
+    export FZF_COMPLETION_OPTS="--border rounded --info inline --no-preview"
+
+    # Directory selection
+    export FZF_ALT_C_OPTS="--border rounded --info inline --no-preview"
+fi
+
+################################################################################
+#                                  6. Others                                   #
+################################################################################

@@ -1,0 +1,379 @@
+name: Release - Create Published Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      draft:
+        type: boolean
+        default: false
+      prerelease:
+        type: boolean
+        default: false
+
+jobs:
+  build-and-release:
+    name: Build and Publish Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Resolve release parameters
+        id: params
+        run: |
+          set -euxo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+            TAG="v${FILE_VERSION}"
+            IS_DRAFT=${{ inputs.draft }}
+            IS_PRERELEASE=${{ inputs.prerelease }}
+            # For manual dispatch, target HEAD as the tag does not exist in history yet
+            TARGET_REF="HEAD"
+            echo "▶  Manual release requested (tag=$TAG, draft=$IS_DRAFT, prerelease=$IS_PRERELEASE)"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+            FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+
+            if [ "${TAG#v}" != "$FILE_VERSION" ]; then
+              echo "❌ VERSION ($FILE_VERSION) must match tag version (${TAG#v})."
+              exit 1
+            fi
+
+            IS_DRAFT=false
+
+            if echo "$TAG" | grep -q '\-'; then
+              IS_PRERELEASE=true
+            else
+              IS_PRERELEASE=false
+            fi
+            # For push events, target the pushed tag
+            TARGET_REF="${TAG}"
+            echo "▶  Tag push triggered (tag=$TAG, draft=$IS_DRAFT, prerelease=$IS_PRERELEASE)"
+          fi
+
+          VERSION="${TAG#v}"
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "is-draft=$IS_DRAFT" >> "$GITHUB_OUTPUT"
+          echo "is-prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "target-ref=$TARGET_REF" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Tag:        $TAG"
+          echo "  Version:    $VERSION"
+          echo "  Draft:      $IS_DRAFT"
+          echo "  Pre-release:$IS_PRERELEASE"
+          echo "  Target Ref: $TARGET_REF"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ──────────────────────────────────────────────
+      # 2. Pack offline bundle with exponential backoff
+      # ──────────────────────────────────────────────
+      - name: Pack offline bundle
+        id: pack
+        run: |
+          set -euo pipefail
+          chmod +x ./omw
+
+          docker compose up -d --build omw
+          trap 'echo "🧹 Cleaning up container..."; docker compose down || true' EXIT
+
+          wait_for_container() {
+            local max_wait=600
+            local ready_msg="OMW CentOS 7 x86 test container is ready."
+            local sleep_time=2
+            local start
+            start=$(date +%s)
+
+            echo "⏳ Waiting for container to be ready (max ${max_wait}s)..."
+            while true; do
+              local now
+              now=$(date +%s)
+              local elapsed=$((now - start))
+
+              if [ "$elapsed" -ge "$max_wait" ]; then
+                echo "❌ Timed out after ${max_wait}s. Container logs (last 50):"
+                docker compose logs omw --tail 50
+                return 1
+              fi
+
+              if ! docker compose ps --status running --services | grep -qx omw 2>/dev/null; then
+                echo "❌ Container exited prematurely. Full logs:"
+                docker compose logs omw
+                return 1
+              fi
+
+              if docker compose logs omw 2>/dev/null | grep -qF "$ready_msg"; then
+                echo "✅ Container ready (${elapsed}s elapsed)."
+                return 0
+              fi
+
+              echo "  Waiting... (${elapsed}s elapsed, next check in ${sleep_time}s)"
+              sleep "$sleep_time"
+
+              sleep_time=$((sleep_time * 2))
+              [ "$sleep_time" -gt 60 ] && sleep_time=60
+            done
+          }
+
+          wait_for_container
+
+          docker compose exec -T -e HOME=/workspace omw ./omw offline pack
+
+          FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+          BUNDLE_PATH="./omw-offline-bundle-v${FILE_VERSION}.tar.gz"
+          if [ ! -f "$BUNDLE_PATH" ]; then
+            echo "❌ Offline bundle was not created at $BUNDLE_PATH."
+            exit 1
+          fi
+
+          BUNDLE_NAME=$(basename "$BUNDLE_PATH")
+          echo "bundle-path=$BUNDLE_PATH" >> "$GITHUB_OUTPUT"
+          echo "bundle-name=$BUNDLE_NAME" >> "$GITHUB_OUTPUT"
+          echo "✅ Bundle created: $BUNDLE_NAME"
+          ls -lh "$BUNDLE_PATH"
+
+      # ──────────────────────────────────────────────
+      # 3. Test the bundle in a clean container
+      # ──────────────────────────────────────────────
+      - name: Test offline bundle
+        run: |
+          set -euo pipefail
+
+          BUNDLE_PATH="${{ github.workspace }}/${{ steps.pack.outputs.bundle-path }}"
+          TEST_DIR="/tmp/omw-test-$(date +%s)"
+          mkdir -p "$TEST_DIR"
+          cd "$TEST_DIR"
+
+          echo "📦 Extracting bundle for test..."
+          tar -xzf "$BUNDLE_PATH"
+          cd oh-my-workspace
+          chmod +x ./omw
+
+          docker compose up -d --build omw
+          trap 'echo "🧹 Cleaning up test container..."; docker compose down || true' EXIT
+
+          wait_for_container() {
+            local max_wait=600
+            local ready_msg="OMW CentOS 7 x86 test container is ready."
+            local sleep_time=2
+            local start
+            start=$(date +%s)
+
+            echo "⏳ Waiting for test container (max ${max_wait}s)..."
+            while true; do
+              local now
+              now=$(date +%s)
+              local elapsed=$((now - start))
+
+              if [ "$elapsed" -ge "$max_wait" ]; then
+                echo "❌ Timed out. Container logs (last 50):"
+                docker compose logs omw --tail 50
+                return 1
+              fi
+
+              if ! docker compose ps --status running --services | grep -qx omw 2>/dev/null; then
+                echo "❌ Container exited. Full logs:"
+                docker compose logs omw
+                return 1
+              fi
+
+              if docker compose logs omw 2>/dev/null | grep -qF "$ready_msg"; then
+                echo "✅ Test container ready (${elapsed}s elapsed)."
+                return 0
+              fi
+
+              echo "  Waiting... (${elapsed}s elapsed, next check in ${sleep_time}s)"
+              sleep "$sleep_time"
+
+              sleep_time=$((sleep_time * 2))
+              [ "$sleep_time" -gt 60 ] && sleep_time=60
+            done
+          }
+
+          wait_for_container
+
+          docker compose exec -T omw ./omw all
+          echo "✅ Offline bundle test passed."
+
+      # ──────────────────────────────────────────────
+      # 4. Parse metadata for the release
+      # ──────────────────────────────────────────────
+      - name: Parse release information
+        id: release-info
+        run: |
+          set -euxo pipefail
+
+          TAG_NAME="${{ steps.params.outputs.tag }}"
+          VERSION="${{ steps.params.outputs.version }}"
+          COMMIT_SHA="${GITHUB_SHA}"
+          COMMIT_SHORT="${GITHUB_SHA:0:7}"
+          BUNDLE_FILE="${{ steps.pack.outputs.bundle-path }}"
+          ASSET_NAME="omw-offline-bundle-${TAG_NAME}.tar.gz"
+
+          echo "tag-name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit-short=$COMMIT_SHORT" >> "$GITHUB_OUTPUT"
+          echo "commit-sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "bundle-file=$BUNDLE_FILE" >> "$GITHUB_OUTPUT"
+          echo "asset-name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
+
+          echo "Release info:"
+          echo "  Tag:    $TAG_NAME"
+          echo "  Version:$VERSION"
+          echo "  Commit: $COMMIT_SHORT"
+          echo "  Bundle: $BUNDLE_FILE"
+
+      # ──────────────────────────────────────────────
+      # 5. Generate release notes from CHANGELOG
+      # ──────────────────────────────────────────────
+      - name: Generate release notes
+        env:
+          TAG_NAME: ${{ steps.release-info.outputs.tag-name }}
+          TARGET_REF: ${{ steps.params.outputs.target-ref }}
+          COMMIT_SHORT: ${{ steps.release-info.outputs.commit-short }}
+          COMMIT_SHA: ${{ steps.release-info.outputs.commit-sha }}
+          ASSET_NAME: ${{ steps.release-info.outputs.asset-name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          RELEASE_DATE=$(date -u +'%Y-%m-%d')
+
+          # Determine the baseline reference tag for the change summary
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          else
+            PREV_TAG=$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || echo "")
+          fi
+
+          # Extract target section from CHANGELOG.md matching bracketed versions, e.g., [0.1.0]
+          CHANGELOG_SECTION=$(awk -v tag="${TAG_NAME#v}" '
+            index($0, "## [" tag "]") == 1 { flag = 1; print; next }
+            index($0, "## [") == 1 { flag = 0 }
+            flag { print }
+          ' CHANGELOG.md)
+                 
+          if [ -z "$CHANGELOG_SECTION" ]; then
+            CHANGELOG_SECTION="No changelog entry found for ${TAG_NAME}."
+          fi
+
+          # Generate commit list section
+          if [ -n "$PREV_TAG" ]; then
+            COMMIT_SECTION="**[View full changes since ${PREV_TAG} →](https://github.com/${REPO}/compare/${PREV_TAG}...${TARGET_REF})**"
+          else
+            COMMIT_SECTION="**[View all commits →](https://github.com/${REPO}/commits/${TARGET_REF})**"
+          fi
+
+          BADGE_LINE=""
+          if [ "${{ steps.params.outputs.is-prerelease }}" = "true" ]; then
+            BADGE_LINE="> ⚠️  This is a **pre-release** version. Not recommended for production use."
+          fi
+          if [ "${{ steps.params.outputs.is-draft }}" = "true" ]; then
+            BADGE_LINE="${BADGE_LINE} This release is a **draft** and only visible to collaborators."
+          fi
+
+          {
+            echo "## ${TAG_NAME}"
+            echo ""
+            if [ -n "$BADGE_LINE" ]; then
+              echo "$BADGE_LINE"
+              echo ""
+            fi
+            echo "**Release Date:** ${RELEASE_DATE}"
+            echo "**Build Commit:** [${COMMIT_SHORT}](https://github.com/${REPO}/commit/${COMMIT_SHA})"
+            echo ""
+            echo "---"
+            echo ""
+            echo "$CHANGELOG_SECTION"
+            echo ""
+            echo "---"
+            echo ""
+            echo "$COMMIT_SECTION"
+            echo ""
+            echo "### 📦 Assets"
+            echo ""
+            echo "- **${ASSET_NAME}** — Complete offline bundle for CentOS 7"
+            echo ""
+            echo "### 🚀 Quick Start"
+            echo ""
+            echo "1. Download the bundle asset above"
+            echo "2. Transfer to your CentOS 7 machine"
+            echo "3. Extract: \`tar -xzf ${ASSET_NAME}\`"
+            echo "4. Navigate: \`cd oh-my-workspace\`"
+            echo "5. Initialize: \`./omw init\`"
+            echo "6. Reload shell: \`source ~/.bashrc\`"
+            echo "7. Install everything: \`./omw all\`"
+            echo ""
+            echo "### 📖 Documentation"
+            echo ""
+            echo "- [CHANGELOG](https://github.com/${REPO}/blob/main/CHANGELOG.md)"
+            echo "- [README](https://github.com/${REPO}/blob/main/README.md)"
+            echo "- [中文文档](https://github.com/${REPO}/blob/main/README.zh-CN.md)"
+          } > release_notes.md
+
+          echo "Release notes generated:"
+          cat release_notes.md
+
+      # ──────────────────────────────────────────────
+      # 6. Create / publish the GitHub Release
+      # ──────────────────────────────────────────────
+      - name: Create GitHub Release
+        id: create-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ steps.release-info.outputs.tag-name }}
+          BUNDLE_FILE: ${{ steps.release-info.outputs.bundle-file }}
+        run: |
+          set -euxo pipefail
+
+          IS_DRAFT="${{ steps.params.outputs.is-draft }}"
+          IS_PRERELEASE="${{ steps.params.outputs.is-prerelease }}"
+
+          echo "🚀 Creating release: ${TAG_NAME}"
+          echo "  Draft:       ${IS_DRAFT}"
+          echo "  Pre-release: ${IS_PRERELEASE}"
+          echo "  Bundle:      ${BUNDLE_FILE}"
+
+          gh release create "${TAG_NAME}" \
+            --title "${TAG_NAME}" \
+            --notes-file release_notes.md \
+            --draft="${IS_DRAFT}" \
+            --prerelease="${IS_PRERELEASE}" \
+            "${BUNDLE_FILE}"
+
+          echo "✅ Release published successfully!"
+
+      # ──────────────────────────────────────────────
+      # 7. Safe Diagnostics on failure
+      #    No destructive deletion is performed to safeguard existing data.
+      # ──────────────────────────────────────────────
+      - name: Diagnostics on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG_NAME: ${{ steps.params.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          echo "⚠️  Pipeline failed."
+          echo "To protect your existing assets, no automated deletion of releases or tags was executed."
+          echo "Please manually inspect the logs above to identify the issue. Target tag: ${TAG_NAME:-unknown}"

@@ -1,0 +1,11 @@
+{
+    "languageserver": {
+          "verible": {
+            "command": "verible-verilog-ls",
+            "args": [
+                "--rules=-line-length,-no-tabs,-suggest-parentheses,-positive-meaning-parameter-name,-explicit-parameter-storage-type,-undersized-binary-literal,-module-filename,-package-filename,-parameter-name-style,-enum-name-style,-struct-union-name-style,-interface-name-style,-macro-name-style,-unpacked-dimensions-range-ordering"
+            ],
+            "filetypes": ["verilog", "systemverilog"]
+        }
+    }
+}

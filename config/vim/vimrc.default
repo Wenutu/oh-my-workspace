@@ -1,0 +1,522 @@
+
+let g:base_path = expand('$OMW_HOME/config/$OMW_VERSION/vim')
+let g:vimrc_dir = g:base_path .. '/vim9'
+let g:coc_config_home = g:base_path .. '/coc'
+let g:coc_data_home = g:base_path .. '/coc'
+
+" Load vim9 scripts
+packloadall
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                              1. Basic Settings                               "
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Config {{{
+" https://www.ruanyifeng.com/blog/2018/09/vimrc.html
+filetype plugin indent on
+set nocompatible
+
+set redrawtime=10000
+set regexpengine=1
+
+syntax on
+
+set showmode
+
+set showcmd
+
+set mouse=a
+
+set encoding=utf-8
+
+set t_Co=256
+
+" theme
+let g:seoul256_background = 237
+silent! colorscheme seoul256
+
+" no
+set number
+
+" foldmethod
+set foldmethod=marker
+nnoremap <space> za
+
+" indent
+set autoindent
+set tabstop=4
+set shiftwidth=4
+set softtabstop=4
+set expandtab
+
+" wrap
+set textwidth=80
+set wrap
+set wrapmargin=2
+
+" match
+set showmatch
+
+" search
+set hlsearch
+set incsearch
+
+" ignorecase
+set ignorecase
+
+set smartcase
+
+" backup
+set nobackup
+set nowritebackup
+set noswapfile
+set noundofile
+
+set autochdir
+
+set visualbell
+
+set history=1000
+
+set autoread
+
+" list
+set listchars=tab:>-,trail:·
+set list
+
+set wildmenu
+set wildmode=longest:list,full
+
+" }}}
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                               2. Plugin Config                               "
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Auto pairs {{{
+" }}}
+
+" AutoHEADER {{{
+let g:autoHEADER_auto_enable=1
+let g:autoHEADER_default_author=$USER
+let g:autoHEADER_auto_update_modified_time=0
+" }}}
+
+" Coc {{{
+" https://raw.githubusercontent.com/neoclide/coc.nvim/master/doc/coc-example-config.vim
+
+" May need for Vim (not Neovim) since coc.nvim calculates byte offset by count
+" utf-8 byte sequence
+set encoding=utf-8
+" Some servers have issues with backup files, see #649
+set nobackup
+set nowritebackup
+
+" Having longer updatetime (default is 4000 ms = 4s) leads to noticeable
+" delays and poor user experience
+set updatetime=300
+
+" Always show the signcolumn, otherwise it would shift the text each time
+" diagnostics appear/become resolved
+set signcolumn=yes
+
+" Use tab for trigger completion with characters ahead and navigate
+" NOTE: There's always complete item selected by default, you may want to enable
+" no select by `"suggest.noselect": true` in your configuration file
+" NOTE: Use command ':verbose imap <tab>' to make sure tab is not mapped by
+" other plugin before putting this into your config
+" inoremap <silent><expr> <TAB>
+      " \ coc#pum#visible() ? coc#pum#next(1) :
+      " \ CheckBackspace() ? "\<Tab>" :
+      " \ coc#refresh()
+inoremap <expr><S-TAB> coc#pum#visible() ? coc#pum#prev(1) : "\<C-h>"
+inoremap <silent><expr> <TAB>
+      \ pumvisible() ? coc#_select_confirm() :
+      \ coc#expandableOrJumpable() ? "\<C-r>=coc#rpc#request('doKeymap', ['snippets-expand-jump',''])\<CR>" :
+      \ CheckBackSpace() ? "\<TAB>" :
+      \ coc#refresh()
+
+function! CheckBackSpace() abort
+  let col = col('.') - 1
+  return !col || getline('.')[col - 1]  =~# '\s'
+endfunction
+
+let g:coc_snippet_next = '<tab>'
+
+" Make <CR> to accept selected completion item or notify coc.nvim to format
+" <C-g>u breaks current undo, please make your own choice
+inoremap <silent><expr> <CR> coc#pum#visible() ? coc#pum#confirm()
+                              \: "\<C-g>u\<CR>\<c-r>=coc#on_enter()\<CR>"
+
+function! CheckBackspace() abort
+  let col = col('.') - 1
+  return !col || getline('.')[col - 1]  =~# '\s'
+endfunction
+
+" Use <c-space> to trigger completion
+if has('nvim')
+  inoremap <silent><expr> <c-space> coc#refresh()
+else
+  inoremap <silent><expr> <c-@> coc#refresh()
+endif
+
+" Use `[g` and `]g` to navigate diagnostics
+" Use `:CocDiagnostics` to get all diagnostics of current buffer in location list
+nmap <silent><nowait> [g <Plug>(coc-diagnostic-prev)
+nmap <silent><nowait> ]g <Plug>(coc-diagnostic-next)
+
+" GoTo code navigation
+nmap <silent><nowait> gd <Plug>(coc-definition)
+nmap <silent><nowait> gy <Plug>(coc-type-definition)
+nmap <silent><nowait> gi <Plug>(coc-implementation)
+nmap <silent><nowait> gr <Plug>(coc-references)
+
+" Use K to show documentation in preview window
+nnoremap <silent> K :call ShowDocumentation()<CR>
+
+function! ShowDocumentation()
+  if CocAction('hasProvider', 'hover')
+    call CocActionAsync('doHover')
+  else
+    call feedkeys('K', 'in')
+  endif
+endfunction
+
+" Highlight the symbol and its references when holding the cursor
+autocmd CursorHold * silent call CocActionAsync('highlight')
+
+" Symbol renaming
+nmap <leader>rn <Plug>(coc-rename)
+
+" Formatting selected code
+xmap <leader>f  <Plug>(coc-format-selected)
+nmap <leader>f  <Plug>(coc-format-selected)
+
+augroup mygroup
+  autocmd!
+  " Setup formatexpr specified filetype(s)
+  autocmd FileType typescript,json setl formatexpr=CocAction('formatSelected')
+augroup end
+
+" Applying code actions to the selected code block
+" Example: `<leader>aap` for current paragraph
+xmap <leader>a  <Plug>(coc-codeaction-selected)
+nmap <leader>a  <Plug>(coc-codeaction-selected)
+
+" Remap keys for applying code actions at the cursor position
+nmap <leader>ac  <Plug>(coc-codeaction-cursor)
+" Remap keys for apply code actions affect whole buffer
+nmap <leader>as  <Plug>(coc-codeaction-source)
+" Apply the most preferred quickfix action to fix diagnostic on the current line
+nmap <leader>qf  <Plug>(coc-fix-current)
+
+" Remap keys for applying refactor code actions
+nmap <silent> <leader>re <Plug>(coc-codeaction-refactor)
+xmap <silent> <leader>r  <Plug>(coc-codeaction-refactor-selected)
+nmap <silent> <leader>r  <Plug>(coc-codeaction-refactor-selected)
+
+" Run the Code Lens action on the current line
+nmap <leader>cl  <Plug>(coc-codelens-action)
+
+" Map function and class text objects
+" NOTE: Requires 'textDocument.documentSymbol' support from the language server
+xmap if <Plug>(coc-funcobj-i)
+omap if <Plug>(coc-funcobj-i)
+xmap af <Plug>(coc-funcobj-a)
+omap af <Plug>(coc-funcobj-a)
+xmap ic <Plug>(coc-classobj-i)
+omap ic <Plug>(coc-classobj-i)
+xmap ac <Plug>(coc-classobj-a)
+omap ac <Plug>(coc-classobj-a)
+
+" Remap <C-f> and <C-b> to scroll float windows/popups
+if has('nvim-0.4.0') || has('patch-8.2.0750')
+  nnoremap <silent><nowait><expr> <C-f> coc#float#has_scroll() ? coc#float#scroll(1) : "\<C-f>"
+  nnoremap <silent><nowait><expr> <C-b> coc#float#has_scroll() ? coc#float#scroll(0) : "\<C-b>"
+  inoremap <silent><nowait><expr> <C-f> coc#float#has_scroll() ? "\<c-r>=coc#float#scroll(1)\<cr>" : "\<Right>"
+  inoremap <silent><nowait><expr> <C-b> coc#float#has_scroll() ? "\<c-r>=coc#float#scroll(0)\<cr>" : "\<Left>"
+  vnoremap <silent><nowait><expr> <C-f> coc#float#has_scroll() ? coc#float#scroll(1) : "\<C-f>"
+  vnoremap <silent><nowait><expr> <C-b> coc#float#has_scroll() ? coc#float#scroll(0) : "\<C-b>"
+endif
+
+" Use CTRL-S for selections ranges
+" Requires 'textDocument/selectionRange' support of language server
+nmap <silent> <C-s> <Plug>(coc-range-select)
+xmap <silent> <C-s> <Plug>(coc-range-select)
+
+" Add `:Format` command to format current buffer
+command! -nargs=0 Format :call CocActionAsync('format')
+
+" Add `:Fold` command to fold current buffer
+command! -nargs=? Fold :call     CocAction('fold', <f-args>)
+
+" Add `:OR` command for organize imports of the current buffer
+command! -nargs=0 OR   :call     CocActionAsync('runCommand', 'editor.action.organizeImport')
+
+" Add (Neo)Vim's native statusline support
+" NOTE: Please see `:h coc-status` for integrations with external plugins that
+" provide custom statusline: lightline.vim, vim-airline
+set statusline^=%{coc#status()}%{get(b:,'coc_current_function','')}
+
+" Mappings for CoCList
+" Show all diagnostics
+nnoremap <silent><nowait> <space>a  :<C-u>CocList diagnostics<cr>
+" Manage extensions
+nnoremap <silent><nowait> <space>e  :<C-u>CocList extensions<cr>
+" Show commands
+nnoremap <silent><nowait> <space>c  :<C-u>CocList commands<cr>
+" Find symbol of current document
+nnoremap <silent><nowait> <space>o  :<C-u>CocList outline<cr>
+" Search workspace symbols
+nnoremap <silent><nowait> <space>s  :<C-u>CocList -I symbols<cr>
+" Do default action for next item
+nnoremap <silent><nowait> <space>j  :<C-u>CocNext<CR>
+" Do default action for previous item
+nnoremap <silent><nowait> <space>k  :<C-u>CocPrev<CR>
+" Resume latest coc list
+nnoremap <silent><nowait> <space>p  :<C-u>CocListResume<CR>
+" }}}
+
+" FZF {{{
+nnoremap <leader>ff :Files<CR>
+nnoremap <leader>fb :Buffers<CR>
+nnoremap <leader>fr :Rg<CR>
+nnoremap <leader>fh :History<CR>
+nnoremap <leader>fm :Maps<CR>
+
+" Path completion with custom source command
+inoremap <expr> <c-x><c-f> fzf#vim#complete#path('fd')
+inoremap <expr> <c-x><c-f> fzf#vim#complete#path('rg --files')
+
+" Word completion with custom spec with popup layout option
+inoremap <expr> <c-x><c-k> fzf#vim#complete#word({'window': { 'width': 0.2, 'height': 0.9, 'xoffset': 1 }})
+
+" Global line completion (not just open buffers. ripgrep required.)
+inoremap <expr> <c-x><c-l> fzf#vim#complete(fzf#wrap({
+  \ 'prefix': '^.*$',
+  \ 'source': 'rg -n ^ --color always',
+  \ 'options': '--ansi --delimiter : --nth 3..',
+  \ 'reducer': { lines -> join(split(lines[0], ':\zs')[2:], '') }}))
+
+let g:fzf_action = {
+  \ 'enter': 'tab split',
+  \ 'ctrl-x': 'split',
+  \ 'ctrl-v': 'vsplit'
+  \ }
+" }}}
+
+" IndentLine {{{
+nnoremap <leader>i :IndentLinesToggle<CR>
+" }}}
+
+" Nerdcommenter {{{
+" Create default mappings
+let g:NERDCreateDefaultMappings = 1
+
+" Add spaces after comment delimiters by default
+let g:NERDSpaceDelims = 1
+
+" Use compact syntax for prettified multi-line comments
+let g:NERDCompactSexyComs = 1
+
+" Align line-wise comment delimiters flush left instead of following code indentation
+let g:NERDDefaultAlign = 'left'
+
+" Set a language to use its alternate delimiters by default
+let g:NERDAltDelims_java = 1
+
+" Add your own custom formats or override the defaults
+let g:NERDCustomDelimiters = { 'c': { 'left': '/*','right': '*/' } }
+
+" Allow commenting and inverting empty lines (useful when commenting a region)
+let g:NERDCommentEmptyLines = 1
+
+" Enable trimming of trailing whitespace when uncommenting
+let g:NERDTrimTrailingWhitespace = 1
+
+" Enable NERDCommenterToggle to check all selected lines is commented or not
+let g:NERDToggleCheckAllLines = 1
+" }}}
+
+" NerdTree {{{
+map <C-t> :NERDTreeToggle<CR>
+
+" vim9: Close the tab if NERDTree is the only window remaining in it.
+autocmd BufEnter * if winnr('$') == 1 && exists('b:NERDTree') && b:NERDTree.isTabTree() | call feedkeys(":quit\<CR>:\<BS>") | endif
+" vim8: Close the tab if NERDTree is the only window remaining in it.
+" autocmd BufEnter * if winnr('$') == 1 && exists('b:NERDTree') && b:NERDTree.isTabTree() | quit | endif
+
+let g:NERDTreeDirArrowExpandable = '?'
+let g:NERDTreeDirArrowCollapsible = '?'
+" }}}
+
+" rainbow {{{
+" }}}
+
+" Tagbar {{{
+nmap <F8> :TagbarToggle<CR>
+" }}}
+
+" Airline{{{
+let g:airline#extensions#tabline#enabled = 1
+let g:airline#extensions#tabline#left_sep = ' '
+let g:airline#extensions#tabline#left_alt_sep = '|'
+let g:airline#extensions#tabline#formatter = 'default'
+" }}}
+
+" Cursorword {{{
+" }}}
+
+" Easy align {{{
+xmap ga <Plug>(EasyAlign)
+nmap ga <Plug>(EasyAlign)
+" }}}
+
+ " Matchup {{{
+let g:loaded_matchit = 1
+" }}}
+
+" Multiple cursors {{{
+let g:multi_cursor_use_default_mapping=0
+
+" Default mapping
+let g:multi_cursor_start_word_key      = '<C-n>'
+let g:multi_cursor_select_all_word_key = '<A-n>'
+let g:multi_cursor_start_key           = 'g<C-n>'
+let g:multi_cursor_select_all_key      = 'g<A-n>'
+let g:multi_cursor_next_key            = '<C-n>'
+let g:multi_cursor_prev_key            = '<C-p>'
+let g:multi_cursor_skip_key            = '<C-x>'
+let g:multi_cursor_quit_key            = '<Esc>'
+" }}}
+
+" Snippets and coc-snippets{{{
+" Use <C-l> for trigger snippet expand.
+imap <C-l> <Plug>(coc-snippets-expand)
+" Use <C-j> for select text for visual placeholder of snippet.
+vmap <C-j> <Plug>(coc-snippets-select)
+" Use <C-j> for jump to next placeholder, it's default of coc.nvim
+let g:coc_snippet_next = '<c-j>'
+" Use <C-k> for jump to previous placeholder, it's default of coc.nvim
+let g:coc_snippet_prev = '<c-k>'
+" Use <C-j> for both expand and jump (make expand higher priority.)
+imap <C-j> <Plug>(coc-snippets-expand-jump)
+" Use <leader>x for convert visual selected code to snippet
+xmap <leader>x  <Plug>(coc-convert-snippet)
+" }}}
+
+" verilog mode {{{
+" --- Basic Key Mappings ---
+" Change the default mode keys
+let g:verilog_mode_map_auto_add = 'la'
+let g:verilog_mode_map_auto_delete = 'ld'
+
+" Change the extra mode keys
+let g:verilog_mode_map_auto_add_extra = 'ta'
+let g:verilog_mode_map_auto_delete_extra = 'td'
+
+" --- Paths ---
+" Specify a different Emacs executable
+" let g:verilog_mode_emacs_executable = '/usr/local/bin/emacs'
+
+" Use a custom verilog-mode.el file instead of the bundled one
+" let g:verilog_mode_elisp_script_path = '~/path/to/your/verilog-mode.el'
+
+" --- Extra Mode Configuration ---
+" A list of extra elisp files to load in "Extra Mode"
+" let g:verilog_mode_extra_elisp_scripts = ['~/.config/emacs/my-project-verilog-settings.el']
+
+" --- Advanced ---
+" Force synchronous (blocking) mode even on modern Vim
+" Useful for debugging or if async behavior is unstable in your environment
+let g:verilog_mode_force_sync = 1
+" }}}
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                             3. Custom Functions                              "
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Helptags {{{
+" Generate helptags for all plugins in the pack directory
+function! GeneratePluginHelpTags()
+    let pack_dir = expand('$OMW_HOME/config/vim/vim9/pack/omw/start')
+    let plugins = split(glob(pack_dir . '/*'), '\n')
+    let success_count = 0
+    let total_count = 0
+
+    for plugin_path in plugins
+        if !isdirectory(plugin_path)
+            continue
+        endif
+        let doc_dir = plugin_path . '/doc'
+        if isdirectory(doc_dir)
+            let total_count += 1
+            try
+                execute 'helptags ' . doc_dir
+                let success_count += 1
+                echomsg '✓ Generated helptags for: ' . fnamemodify(plugin_path, ':t')
+            catch
+                echomsg '✗ Failed to generate helptags for: ' . fnamemodify(plugin_path, ':t')
+            endtry
+        endif
+    endfor
+
+    if total_count > 0
+        echomsg printf('Helptags generation complete: %d/%d plugins processed', success_count, total_count)
+    else
+        echomsg 'No plugins with doc directories found'
+    endif
+endfunction
+
+command! GeneratePluginHelpTags call GeneratePluginHelpTags()
+" Generate helptags for all plugins
+nnoremap <leader>ht :GeneratePluginHelpTags<CR>
+" }}}
+
+" Fix whitespace {{{
+function! s:FixWhitespace(line1, line2)
+    let l:save_search = @/
+    silent! keepjumps execute ':' . a:line1 . ',' . a:line2 . 's/\s\+$//'
+    let @/ = l:save_search
+endfunction
+
+
+command! -range=% FixWhitespace call <SID>FixWhitespace(<line1>, <line2>)
+
+" Trailing Whitespace Handling
+highlight ExtraWhitespace ctermbg=red guibg=red
+
+augroup ActiveWhitespace
+    autocmd!
+    autocmd ColorScheme * highlight ExtraWhitespace ctermbg=red guibg=red
+
+    autocmd BufRead,BufNew,FileType * match ExtraWhitespace /\s\+$/
+    autocmd InsertEnter * match ExtraWhitespace /\s\+\%#\@<!$/
+    autocmd InsertLeave * match ExtraWhitespace /\s\+$/
+    autocmd BufWinLeave * call clearmatches()
+augroup END
+
+" Fix whitespace in entire buffer
+nnoremap <leader>fw :FixWhitespace<CR>
+" Fix current line
+nnoremap <leader>fl :call <SID>FixWhitespace(line('.')  , line('.'))<CR>
+" Fix whitespace in selection
+vnoremap <leader>fw :FixWhitespace<CR>
+" }}}
+
+" Switch Foldmethod Between Marker and Syntax
+function! ToggleFoldMethod()
+    if &foldmethod == 'marker'
+        set foldmethod=syntax
+        echo "Switched foldmethod to syntax"
+    else
+        set foldmethod=marker
+        echo "Switched foldmethod to marker"
+    endif
+endfunction
+
+" ToggleautoHEADER
+
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+"                                4. Config Plus                                "
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+nnoremap <leader>ev :vsplit $MYVIMRC<CR>
+nnoremap <leader>sv :source $MYVIMRC<CR>:echo "vimrc reloaded!"<CR>
