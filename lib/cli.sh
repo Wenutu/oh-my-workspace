@@ -70,7 +70,7 @@ _omw_cli_print_main_help() {
 	_omw_cli_help_section "Maintenance"
 	_omw_cli_help_command "status [installed]" "Show installable or installed items"
 	_omw_cli_help_command "doctor [profile]" "Check local OMW runtime health"
-	_omw_cli_help_command "update check" "Check supported upstream versions"
+	_omw_cli_help_command "update check" "Check upstream package and Vim plugin updates"
 	_omw_cli_help_command "clean <target> [--dry-run]" "Remove generated artifacts"
 	_omw_cli_help_command "help [command [action]]" "Show contextual help"
 
@@ -209,7 +209,9 @@ _omw_cli_print_help() {
 	update:*) cat <<-EOF ;;
 		Usage: ./omw update check
 
-		Check supported upstream software and app versions.
+		Check source software, apps, Node packages, Coc extensions, and Vim
+		Git plugins for upstream updates. Vim plugins compare local and remote
+		commits; package definitions remain pinned until changed intentionally.
 		EOF
 	*)
 		omw_log "Unknown help topic: $topic${action:+ $action}" "ERROR"
@@ -436,6 +438,14 @@ _omw_cli_parse() {
 
 _omw_cli_is_meta_command() {
 	[[ "$OMW_COMMAND" == "help" || "$OMW_COMMAND" == "version" ]]
+}
+
+_omw_cli_is_read_only_command() {
+	case "$OMW_COMMAND" in
+	status | doctor | "offline verify" | "update check") return 0 ;;
+	upgrade) [[ "${OMW_DRY_RUN:-false}" == "true" ]] ;;
+	*) return 1 ;;
+	esac
 }
 
 _omw_cli_check_sys_deps() {

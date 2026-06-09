@@ -320,7 +320,7 @@ software "zsh" \
 	"-"
 
 software "vim" \
-	"9.2.0586" \
+	"9.2.0604" \
 	"https://github.com/vim/vim/archive/refs/tags/v{VERSION}.tar.gz" \
 	"ncurses@6.6 lua@5.4.7 local@1.0.0 python@3.12.12" \
 	"-" \
@@ -414,8 +414,8 @@ app "verible" \
 ###############################################################################
 
 # Pin concrete versions for reproducible offline npm cache packing.
-node_package "codex" "@openai/codex" "0.135.0" "codex" "22.22.3"
-node_package "claude-code" "@anthropic-ai/claude-code" "2.1.150" "claude" "22.22.3"
+node_package "codex" "@openai/codex" "0.138.0" "codex" "22.22.3"
+node_package "claude-code" "@anthropic-ai/claude-code" "2.1.169" "claude" "22.22.3"
 
 ###############################################################################
 # Node Cache-Only Packages

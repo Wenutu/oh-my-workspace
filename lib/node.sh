@@ -185,7 +185,7 @@ _omw_node_restore_cache_archive() {
 		return 1
 	}
 	mv "$stage_dir/$(basename "$cache_dir")" "$cache_dir"
-	omw_tx_commit
+	omw_tx_commit || return 1
 	_omw_node_cache_ready
 }
 
@@ -312,7 +312,7 @@ omw_node_package_status() {
 	local node_version="${NODE_PACKAGE_NODE_VERSIONS[$alias]:-}"
 	local bin_name="${NODE_PACKAGE_BINS[$alias]:-}"
 	local package_name="${NODE_PACKAGE_NAMES[$alias]:-}"
-	local prefix package_dir
+	local prefix package_dir actual
 
 	_omw_node_require_alias "$alias" || {
 		printf 'missing'
@@ -322,16 +322,17 @@ omw_node_package_status() {
 	package_dir="$prefix/lib/node_modules/$package_name"
 
 	if [[ ! -f "$(_omw_node_modulefile "$node_version")" ]]; then
-		printf 'missing'
+		actual=missing
 	elif [[ -n "$bin_name" && -x "$prefix/bin/$bin_name" && -d "$package_dir" ]]; then
-		printf 'installed'
+		actual=installed
 	elif [[ -z "$bin_name" && -d "$package_dir" ]]; then
-		printf 'installed'
+		actual=installed
 	elif [[ -n "$bin_name" && (-e "$prefix/bin/$bin_name" || -d "$package_dir") ]]; then
-		printf 'partial'
+		actual=partial
 	else
-		printf 'available'
+		actual=available
 	fi
+	omw_receipt_state node "$alias" "${NODE_PACKAGE_VERSIONS[$alias]:-}" "$actual"
 }
 
 omw_node_cache_package_status() {
@@ -475,9 +476,13 @@ omw_node_restore_cache() {
 
 omw_node_install() {
 	local alias="$1"
-	local cache_dir node_version spec bin_name
+	local cache_dir node_version spec bin_name prefix package_dir bin_path
 
 	_omw_node_require_alias "$alias" || return 1
+	if [[ "$(omw_node_package_status "$alias")" =~ ^(installed|legacy)$ ]]; then
+		omw_log "Node package '$alias' is already installed. Skipping." "INFO"
+		return 0
+	fi
 	cache_dir=$(_omw_node_cache_dir)
 	if ! _omw_node_cache_ready; then
 		_omw_node_restore_cache_archive || true
@@ -490,16 +495,30 @@ omw_node_install() {
 	node_version="${NODE_PACKAGE_NODE_VERSIONS[$alias]}"
 	spec=$(_omw_node_package_spec "$alias")
 	bin_name="${NODE_PACKAGE_BINS[$alias]:-}"
+	prefix=$(_omw_node_prefix "$node_version")
+	package_dir="$prefix/lib/node_modules/${NODE_PACKAGE_NAMES[$alias]}"
+	bin_path="${bin_name:+$prefix/bin/$bin_name}"
 	omw_node_load_version "$node_version" || return 1
 
 	omw_log "Installing Node package offline: $spec" "INFO"
+	omw_tx_begin || return 1
+	omw_tx_backup_internal "$package_dir" || { omw_tx_rollback; return 1; }
+	if [[ -n "$bin_path" ]]; then
+		omw_tx_backup_internal "$bin_path" || { omw_tx_rollback; return 1; }
+	fi
 	if ! npm install -g "$spec" --offline --cache "$cache_dir" --audit=false --fund=false; then
 		omw_log "Failed to install Node package: $alias" "ERROR"
+		omw_tx_rollback
 		return 1
 	fi
 	if [[ -n "$bin_name" && ! -e "$(_omw_node_prefix "$node_version")/bin/$bin_name" ]]; then
 		omw_log "Expected Node package bin was not found after install: $bin_name" "WARN"
 	fi
+	omw_write_receipt node "$alias" "${NODE_PACKAGE_VERSIONS[$alias]}" "$(_omw_node_cache_archive_path)" || {
+		omw_tx_rollback
+		return 1
+	}
+	omw_tx_commit || return 1
 	omw_log "Node package '$alias' installed successfully." "SUCCESS"
 }
 

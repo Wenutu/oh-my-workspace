@@ -59,11 +59,12 @@ _omw_upgrade_print_path_status() {
 
 _omw_upgrade_meta_value() {
 	local key="$1"
-	local line
+	local line count
 
 	[[ -f "${OMW_UPGRADE_META_FILE:-}" ]] || return 1
-	line=$(grep -E "^${key}=" "$OMW_UPGRADE_META_FILE" | head -n 1 || true)
-	[[ -n "$line" ]] || return 1
+	count=$(grep -Ec "^${key}=" "$OMW_UPGRADE_META_FILE" || true)
+	[[ "$count" == "1" ]] || return 1
+	line=$(grep -E "^${key}=" "$OMW_UPGRADE_META_FILE")
 	printf '%s\n' "${line#*=}"
 }
 
@@ -84,20 +85,31 @@ _omw_upgrade_manifest_has_path() {
 }
 
 _omw_upgrade_require_bundle_metadata() {
-	local format manifest_path algorithm version version_file
+	local format manifest_format manifest_path algorithm version version_file key
 
 	[[ -f "${OMW_UPGRADE_META_FILE:-}" ]] || {
 		omw_log "Upgrade bundle is missing .omw-bundle-meta; regenerate it with './omw offline pack'." "ERROR"
 		return 1
 	}
+	if grep -Ev '^[A-Za-z_][A-Za-z0-9_]*=[^[:cntrl:]]*$' "$OMW_UPGRADE_META_FILE" | grep -q .; then
+		omw_log "Upgrade bundle metadata contains an invalid record." "ERROR"
+		return 1
+	fi
+	while IFS= read -r key; do
+		[[ "$(grep -Ec "^${key}=" "$OMW_UPGRADE_META_FILE")" == "1" ]] || {
+			omw_log "Upgrade bundle metadata contains duplicate field: $key" "ERROR"
+			return 1
+		}
+	done < <(cut -d= -f1 "$OMW_UPGRADE_META_FILE" | LC_ALL=C sort -u)
 	format=$(_omw_upgrade_meta_value bundle_format) || format=""
 	[[ "$format" == "2" ]] || {
 		omw_log "Unsupported upgrade bundle format: ${format:-missing}. Regenerate it with './omw offline pack'." "ERROR"
 		return 1
 	}
+	manifest_format=$(_omw_upgrade_meta_value manifest_format) || manifest_format=""
 	manifest_path=$(_omw_upgrade_meta_value manifest_path) || manifest_path=""
 	algorithm=$(_omw_upgrade_meta_value manifest_algorithm) || algorithm=""
-	[[ "$manifest_path" == ".omw-bundle-manifest" && "$algorithm" == "md5" && -f "${OMW_UPGRADE_MANIFEST_FILE:-}" ]] || {
+	[[ "$manifest_format" == "2" && "$manifest_path" == ".omw-bundle-manifest" && "$algorithm" == "md5" && -f "${OMW_UPGRADE_MANIFEST_FILE:-}" ]] || {
 		omw_log "Upgrade bundle metadata does not point to a valid md5 manifest." "ERROR"
 		return 1
 	}
@@ -127,6 +139,19 @@ _omw_upgrade_require_bundle_metadata() {
 		omw_log "Upgrade bundle is missing versioned lib/$version." "ERROR"
 		return 1
 	}
+	for key in managed_policy config_policy packages_policy npm_cache_policy; do
+		_omw_upgrade_meta_value "$key" >/dev/null || {
+			omw_log "Upgrade bundle metadata is missing required field: $key" "ERROR"
+			return 1
+		}
+	done
+	[[ "$(_omw_upgrade_meta_value managed_policy)" == "replace-exact" &&
+		"$(_omw_upgrade_meta_value config_policy)" == "restore-from-versioned-packages" &&
+		"$(_omw_upgrade_meta_value packages_policy)" == "merge-overlay" &&
+		"$(_omw_upgrade_meta_value npm_cache_policy)" == "replace" ]] || {
+		omw_log "Upgrade bundle metadata contains an unsupported policy." "ERROR"
+		return 1
+	}
 }
 
 _omw_upgrade_validate_manifest_rel() {
@@ -152,6 +177,24 @@ _omw_upgrade_validate_archive_members() {
 
 _omw_upgrade_verify_bundle_manifest() {
 	local rel source
+
+	awk -F '\t' '
+		NR == 1 { if ($0 != "format\t2") exit 1; next }
+		NR == 2 { if ($0 != "algorithm\tmd5") exit 1; next }
+		$1 == "F" { if (NF != 4 || $2 !~ /^[0-9a-fA-F]{32}$/ || $3 !~ /^[0-7]{3,4}$/ || $4 == "") exit 1; next }
+		$1 == "D" { if (NF != 4 || $2 != "-" || $3 !~ /^[0-7]{3,4}$/ || $4 == "") exit 1; next }
+		$1 == "L" { if (NF != 4 || $2 != "-" || $3 == "" || $4 == "") exit 1; next }
+		{ exit 1 }
+	' "$OMW_UPGRADE_MANIFEST_FILE" || {
+		omw_log "Upgrade bundle manifest contains an invalid v2 record." "ERROR"
+		return 1
+	}
+	if awk -F '\t' '$1 ~ /^[FDL]$/ { count[$4]++ } END { for (path in count) if (count[path] > 1) exit 1 }' "$OMW_UPGRADE_MANIFEST_FILE"; then
+		:
+	else
+		omw_log "Upgrade bundle manifest contains duplicate paths." "ERROR"
+		return 1
+	fi
 
 	while IFS= read -r rel; do
 		_omw_upgrade_validate_manifest_rel "$rel" || {
@@ -527,19 +570,31 @@ _omw_upgrade_extract_bundle() {
 	local stage_dir="$2"
 	local root
 
-	omw_safe_rm_rf "$stage_dir" || return 1
+	_omw_upgrade_remove_stage "$stage_dir" || return 1
 	mkdir -p "$stage_dir" || return 1
 	if ! tar -xzf "$input" -C "$stage_dir"; then
 		omw_log "Failed to extract upgrade bundle: $input" "ERROR"
-		omw_safe_rm_rf "$stage_dir"
+		_omw_upgrade_remove_stage "$stage_dir"
 		return 1
 	fi
 	root=$(_omw_upgrade_bundle_root_from_dir "$stage_dir") || {
 		omw_log "Upgrade bundle does not contain a valid OMW root." "ERROR"
-		omw_safe_rm_rf "$stage_dir"
+		_omw_upgrade_remove_stage "$stage_dir"
 		return 1
 	}
 	printf '%s\n' "$root"
+}
+
+_omw_upgrade_remove_stage() {
+	local path="$1"
+	if _omw_fs_is_internal_path "$path"; then
+		omw_safe_rm_rf "$path"
+	elif [[ "$path" == /tmp/omw-upgrade-dry-run-* ]]; then
+		rm -rf -- "$path"
+	else
+		omw_log "Refusing to remove unsafe upgrade stage: $path" "ERROR"
+		return 1
+	fi
 }
 
 _omw_upgrade_resolve_bundle_root() {
@@ -564,14 +619,26 @@ _omw_upgrade_resolve_bundle_root() {
 	fi
 }
 
-_omw_upgrade_plan_line() {
+_omw_upgrade_plan_reset() {
+	OMW_UPGRADE_PLAN_ACTIONS=()
+	OMW_UPGRADE_PLAN_LABELS=()
+	OMW_UPGRADE_PLAN_SOURCES=()
+	OMW_UPGRADE_PLAN_DESTS=()
+	OMW_UPGRADE_PLAN_POLICIES=()
+}
+
+_omw_upgrade_plan_add() {
 	local action="$1"
 	local label="$2"
 	local source="$3"
 	local dest="$4"
 	local policy="${5:-merge-overlay}"
 
-	printf '%s\t%s\t%s\t%s\t%s\n' "$action" "$label" "$source" "$dest" "$policy"
+	OMW_UPGRADE_PLAN_ACTIONS+=("$action")
+	OMW_UPGRADE_PLAN_LABELS+=("$label")
+	OMW_UPGRADE_PLAN_SOURCES+=("$source")
+	OMW_UPGRADE_PLAN_DESTS+=("$dest")
+	OMW_UPGRADE_PLAN_POLICIES+=("$policy")
 }
 
 _omw_upgrade_build_plan() {
@@ -581,13 +648,14 @@ _omw_upgrade_build_plan() {
 
 	_omw_upgrade_require_bundle_metadata || return 1
 	_omw_upgrade_verify_bundle_manifest || return 1
+	_omw_upgrade_plan_reset
 
 	while IFS=$'\t' read -r item policy; do
 		source="$bundle_root/$item"
 		if [[ -e "$source" || -L "$source" ]]; then
-			_omw_upgrade_plan_line "update" "$item" "$source" "$OMW_HOME/$item" "$policy"
+			_omw_upgrade_plan_add "update" "$item" "$source" "$OMW_HOME/$item" "$policy"
 		else
-			_omw_upgrade_plan_line "skip-missing" "$item" "$source" "$OMW_HOME/$item" "$policy"
+			_omw_upgrade_plan_add "skip-missing" "$item" "$source" "$OMW_HOME/$item" "$policy"
 		fi
 	done < <(_omw_upgrade_managed_items)
 
@@ -596,12 +664,22 @@ _omw_upgrade_build_plan() {
 			omw_log "Upgrade bundle does not contain packages/ for --replace-packages." "ERROR"
 			return 1
 		fi
-		_omw_upgrade_plan_line "replace-packages" "packages" "$bundle_root/packages" "$PACKAGES_PATH" "replace-exact"
+		_omw_upgrade_plan_add "replace-packages" "packages" "$bundle_root/packages" "$PACKAGES_PATH" "replace-exact"
 	elif [[ -d "$bundle_root/packages" ]]; then
-		_omw_upgrade_plan_line "merge-packages" "packages" "$bundle_root/packages" "$PACKAGES_PATH" "merge-overlay"
+		_omw_upgrade_plan_add "merge-packages" "packages" "$bundle_root/packages" "$PACKAGES_PATH" "merge-overlay"
 	else
-		_omw_upgrade_plan_line "skip-missing" "packages" "$bundle_root/packages" "$PACKAGES_PATH" "merge-overlay"
+		_omw_upgrade_plan_add "skip-missing" "packages" "$bundle_root/packages" "$PACKAGES_PATH" "merge-overlay"
 	fi
+
+	# Adopt the bundle control files only after its managed content and packages.
+	for item in .omw-bundle-meta .omw-bundle-manifest; do
+		source="$bundle_root/$item"
+		[[ -f "$source" && ! -L "$source" ]] || {
+			omw_log "Upgrade bundle is missing $item." "ERROR"
+			return 1
+		}
+		_omw_upgrade_plan_add "update" "$item" "$source" "$OMW_HOME/$item" "replace-exact"
+	done
 
 	# VERSION activates the newly installed lib and package set, so update it last.
 	source="$bundle_root/VERSION"
@@ -609,18 +687,20 @@ _omw_upgrade_build_plan() {
 		omw_log "Upgrade bundle is missing VERSION." "ERROR"
 		return 1
 	}
-	_omw_upgrade_plan_line "update" "VERSION" "$source" "$OMW_HOME/VERSION" "replace-exact"
+	_omw_upgrade_plan_add "update" "VERSION" "$source" "$OMW_HOME/VERSION" "replace-exact"
 }
 
 _omw_upgrade_preview_plan() {
-	local plan="$1"
-	local action label source dest policy
-	local rel
+	local action label source dest policy rel i
 
 	printf '%-72s %-14s %s\n' "PATH" "STATUS" "NOTE"
 	printf '%-72s %-14s %s\n' "----" "------" "----"
-	while IFS=$'\t' read -r action label source dest policy; do
-		[[ -n "$action" ]] || continue
+	for ((i = 0; i < ${#OMW_UPGRADE_PLAN_ACTIONS[@]}; i++)); do
+		action="${OMW_UPGRADE_PLAN_ACTIONS[$i]}"
+		label="${OMW_UPGRADE_PLAN_LABELS[$i]}"
+		source="${OMW_UPGRADE_PLAN_SOURCES[$i]}"
+		dest="${OMW_UPGRADE_PLAN_DESTS[$i]}"
+		policy="${OMW_UPGRADE_PLAN_POLICIES[$i]}"
 		case "$action" in
 		update)
 			rel=$(_omw_upgrade_source_rel "$source") || rel="$label"
@@ -651,7 +731,7 @@ _omw_upgrade_preview_plan() {
 			return 1
 			;;
 		esac
-	done <<<"$plan"
+	done
 }
 
 _omw_upgrade_execute_update() {
@@ -782,11 +862,14 @@ _omw_upgrade_execute_replace_packages() {
 }
 
 _omw_upgrade_execute_plan() {
-	local plan="$1"
-	local action label source dest policy
+	local action label source dest policy i
 
-	while IFS=$'\t' read -r action label source dest policy; do
-		[[ -n "$action" ]] || continue
+	for ((i = 0; i < ${#OMW_UPGRADE_PLAN_ACTIONS[@]}; i++)); do
+		action="${OMW_UPGRADE_PLAN_ACTIONS[$i]}"
+		label="${OMW_UPGRADE_PLAN_LABELS[$i]}"
+		source="${OMW_UPGRADE_PLAN_SOURCES[$i]}"
+		dest="${OMW_UPGRADE_PLAN_DESTS[$i]}"
+		policy="${OMW_UPGRADE_PLAN_POLICIES[$i]}"
 		case "$action" in
 		update) _omw_upgrade_execute_update "$label" "$source" "$dest" "$policy" || return 1 ;;
 		merge-packages) _omw_upgrade_execute_merge_packages "$label" "$source" "$dest" "$policy" || return 1 ;;
@@ -797,7 +880,7 @@ _omw_upgrade_execute_plan() {
 			return 1
 			;;
 		esac
-	done <<<"$plan"
+	done
 }
 
 omw_upgrade_from_bundle() {
@@ -805,21 +888,27 @@ omw_upgrade_from_bundle() {
 	local dry_run="${2:-false}"
 	local replace_packages="${3:-false}"
 	local stage_dir="$BUILDS_PATH/.upgrade-bundle-$$"
-	local bundle_root plan status=0
+	local bundle_root status=0
 
 	omw_log "--- Upgrading OMW from bundle ---" "INFO"
-	bundle_root=$(_omw_upgrade_resolve_bundle_root "$input" "$stage_dir") || return 1
+	if [[ "$dry_run" == "true" ]]; then
+		stage_dir=$(mktemp -d /tmp/omw-upgrade-dry-run-XXXXXX) || return 1
+	fi
+	bundle_root=$(_omw_upgrade_resolve_bundle_root "$input" "$stage_dir") || {
+		[[ -d "$stage_dir" ]] && _omw_upgrade_remove_stage "$stage_dir"
+		return 1
+	}
 	OMW_UPGRADE_BUNDLE_ROOT="$bundle_root"
 	OMW_UPGRADE_META_FILE="$bundle_root/.omw-bundle-meta"
 	OMW_UPGRADE_MANIFEST_FILE="$bundle_root/.omw-bundle-manifest"
-	plan=$(_omw_upgrade_build_plan "$bundle_root" "$replace_packages") || {
-		[[ -d "$stage_dir" ]] && omw_safe_rm_rf "$stage_dir"
+	_omw_upgrade_build_plan "$bundle_root" "$replace_packages" || {
+		[[ -d "$stage_dir" ]] && _omw_upgrade_remove_stage "$stage_dir"
 		return 1
 	}
 
 	if [[ "$dry_run" == "true" ]]; then
-		_omw_upgrade_preview_plan "$plan" || status=$?
-		[[ -d "$stage_dir" ]] && omw_safe_rm_rf "$stage_dir"
+		_omw_upgrade_preview_plan || status=$?
+		[[ -d "$stage_dir" ]] && _omw_upgrade_remove_stage "$stage_dir"
 		if ((status == 0)); then
 			omw_log "Upgrade preview complete." "SUCCESS"
 		fi
@@ -834,14 +923,18 @@ omw_upgrade_from_bundle() {
 		omw_tx_track_internal_tmp "$stage_dir" || status=$?
 	fi
 	if ((status == 0)); then
-		_omw_upgrade_execute_plan "$plan" || status=$?
+		_omw_upgrade_execute_plan || status=$?
 	fi
 
 	if ((status == 0)); then
-		omw_tx_commit
-		omw_log "Upgrade complete." "SUCCESS"
+		if omw_tx_commit; then
+			omw_log "Upgrade complete." "SUCCESS"
+		else
+			status=1
+			omw_log "Upgrade completed but transaction cleanup failed." "ERROR"
+		fi
 	else
-		omw_tx_rollback
+		omw_tx_rollback || status=1
 		omw_log "Upgrade failed; restored previous OMW state." "ERROR"
 	fi
 	return "$status"

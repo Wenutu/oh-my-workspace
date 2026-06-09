@@ -80,11 +80,19 @@ source ~/.bashrc
 
 - `./omw status [installed]`：查看可安装项目，或只查看已安装项目。
 - `./omw doctor [profile]`：检查本地 OMW 运行环境，不修改文件。
-- `./omw update check`：检查受支持的上游版本。
+- `./omw update check`：检查源码软件、应用、Node 包、Coc 扩展和 Vim Git 插件是否有上游更新。
 - `./omw clean <builds|packages|config|installs|apps|node|all> [--dry-run]`：删除或预览生成物。`all` 会保留可部署缓存，便于随后通过 `./omw all` 恢复工作区；使用 `packages` 可删除下载包与打包缓存。
+
+`update check` 会将固定的软件包版本与兼容的上游版本或 npm `latest` 比较；
+Vim Git 插件则比较已准备的本地提交与声明分支或远端 HEAD。结果明确区分
+`current`、`available`、`unsupported`、`error` 和 `missing`，可通过
+`--no-color` 关闭颜色。
 
 `./omw config prepare <target|all> --force` 会重新下载生成资产并覆盖配置压缩包。
 `./omw offline pack --force` 会在生成完整离线包前执行同样的刷新。刷新失败时会恢复原有资产。
+
+`status` 将带有效 receipt 的安装显示为 `installed`，旧版兼容安装显示为
+`legacy`，receipt 与实际内容不一致时显示为 `partial`。
 通用参数 `--no-color` 可关闭颜色输出，`--version` 可显示 OMW 版本。使用
 `--refresh` 可只重新生成 modulefile 并跳过源码重建，使用 `clean --dry-run`
 可预览待删除路径。`upgrade --replace-packages` 会用离线包中的 `packages/`
@@ -154,11 +162,18 @@ OMW 管理文件，安装 `lib/$OMW_VERSION/`，合并 `packages/`，并在最�
 从新版 `packages/config-<target>-$OMW_VERSION.tar.gz` 恢复版本化运行配置，
 因此 `config/local/` 会保持不变。
 
+升级还会事务化替换工作区根目录中的 `.omw-bundle-meta` 和
+`.omw-bundle-manifest`，使其与本次安装的 bundle 一致。它们会在管理内容和
+`packages/` 更新后、`VERSION` 激活新版运行时前替换。这两个控制文件有意不写入
+manifest 自身，因此每次升级都会采用当前 bundle 中的版本。
+
 `--dry-run` 会打印真实执行路径使用的同一份升级计划，并展示 source/target 路径、
 manifest 摘要、路径策略以及每个管理路径的执行决策。新版离线包必须包含
 `.omw-bundle-manifest`；旧离线包需要先用
 `./omw offline pack` 重新生成。manifest 采用 tab 分隔的 v2 格式，记录文件、目录、软链、文件 md5 和 mode，不使用
 JSON。真实执行时未变化的路径会跳过。升级过程中任一步骤失败时，OMW 会在返回前回滚事务。
+
+Bundle v2 使用 MD5 是为了快速发现意外损坏，不用于验证发布者身份，也不能作为安全签名。
 
 默认情况下，`packages/` 采用临时目录合并后事务替换：先复制当前 package 缓存，
 再按 manifest 覆盖离线包中记录不同或本地缺失的条目，最后整体替换回
@@ -280,6 +295,7 @@ builds/     临时构建目录
 tools/      编译安装的软件与 modulefile
 apps/       预编译应用
 bin/        应用软链
+state/      本地安装 receipt 与可恢复事务 journal，不进入离线包
 ```
 
 `lib/` 按职责拆分：
@@ -287,7 +303,7 @@ bin/        应用软链
 ```text
 common.sh    初始化、日志、配置校验、备份与链接辅助函数
 fs.sh        安全文件操作、下载、解压与压缩包校验
-tx.sh        事务备份、回滚、提交与临时路径清理
+tx.sh        事务备份、回滚、提交、HOME 路径保护与中断恢复
 registry.sh  packages.sh 声明查询与 URL 渲染
 workflow.sh  all、build-all、config-all、clean 等命令编排
 doctor.sh    本地运行环境健康检查

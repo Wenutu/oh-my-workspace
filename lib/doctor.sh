@@ -96,6 +96,68 @@ _omw_doctor_check_offline_assets() {
 	return 0
 }
 
+_omw_doctor_check_state() {
+	local errors=0 warnings=0 path state name version versions_str status
+	printf '\nOMW state\n'
+	_omw_doctor_result "OK" "bundle contract: format=2 manifest=2 algorithm=md5"
+	if [[ -d "$RECEIPTS_PATH" ]]; then
+		while IFS= read -r path; do
+			if ! omw_receipt_valid "$path"; then
+				_omw_doctor_result "ERROR" "invalid receipt: $path"
+				((++errors))
+			fi
+		done < <(find "$RECEIPTS_PATH" -type f -name '*.receipt' 2>/dev/null | LC_ALL=C sort)
+	fi
+	if [[ -d "$TRANSACTIONS_PATH" ]]; then
+		while IFS= read -r path; do
+			state=$(cat "$path/state" 2>/dev/null || true)
+			if [[ "$state" == "active" ]]; then
+				_omw_doctor_result "ERROR" "active transaction remains: $path"
+				((++errors))
+			fi
+		done < <(find "$TRANSACTIONS_PATH" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort)
+	fi
+	while IFS= read -r path; do
+		_omw_doctor_result "WARN" "transaction backup remains: $path"
+		((++warnings))
+	done < <(find "$OMW_HOME" -name '*.tx-backup-*' -print 2>/dev/null | LC_ALL=C sort)
+	while IFS= read -r path; do
+		_omw_doctor_result "WARN" "external transaction backup remains: $path"
+		((++warnings))
+	done < <(find "$OMW_HOME/backups/transactions" -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | LC_ALL=C sort)
+	((warnings == 0)) && _omw_doctor_result "OK" "no residual transaction backups"
+	for name in "${SOFTWARE_LIST[@]}"; do
+		versions_str="${SOFTWARE_VERSIONS[$name]:-}"
+		for version in $versions_str; do
+			status=$(_omw_status_software_install_status "$name" "$version")
+			if [[ "$status" == "partial" ]]; then
+				_omw_doctor_result "ERROR" "partial software installation: $name@$version"
+				((++errors))
+			elif [[ "$status" == "legacy" ]]; then
+				((++warnings))
+			fi
+		done
+	done
+	for name in "${APP_LIST[@]}"; do
+		status=$(omw_app_install_status "$name")
+		[[ "$status" != "partial" ]] || { _omw_doctor_result "ERROR" "partial app installation: $name"; ((++errors)); }
+		[[ "$status" != "legacy" ]] || ((++warnings))
+	done
+	for name in "${NODE_PACKAGE_LIST[@]}"; do
+		status=$(omw_node_package_status "$name")
+		[[ "$status" != "partial" ]] || { _omw_doctor_result "ERROR" "partial Node package installation: $name"; ((++errors)); }
+		[[ "$status" != "legacy" ]] || ((++warnings))
+	done
+	for name in "${CONFIG_TARGET_LIST[@]}"; do
+		status=$(_omw_status_config_install_status "$name")
+		[[ "$status" != "partial" ]] || { _omw_doctor_result "ERROR" "partial config installation: $name"; ((++errors)); }
+		[[ "$status" != "legacy" ]] || ((++warnings))
+	done
+	((warnings == 0)) || _omw_doctor_result "WARN" "legacy installations without receipts: $warnings"
+	_omw_doctor_result "OK" "software dependency graph validated"
+	return "$errors"
+}
+
 omw_doctor() {
 	local profile="${1:-base}"
 	local errors=0
@@ -110,6 +172,7 @@ omw_doctor() {
 	_omw_doctor_check_module || errors=$((errors + $?))
 	_omw_doctor_check_registry || errors=$((errors + $?))
 	_omw_doctor_check_offline_assets || errors=$((errors + $?))
+	_omw_doctor_check_state || errors=$((errors + $?))
 
 	printf '\n'
 	if ((errors > 0)); then

@@ -14,11 +14,8 @@ _omw_app_install_autojump() {
 		omw_log "autojump install.py not found in $install_dir." "ERROR"
 		return 1
 	fi
-	local backup_dir=""
-	if [[ -e "$HOME/.autojump" ]]; then
-		backup_dir="$HOME/.autojump-backup-$(date +%Y%m%d%H%M%S)"
-		mv "$HOME/.autojump" "$backup_dir"
-	fi
+	omw_tx_backup_if_active "$HOME/.autojump" || return 1
+	omw_tx_backup_if_active "$HOME/.zshrc" || return 1
 	# Run the install script
 	local dirname
 	dirname=$(dirname "$exec_path")
@@ -35,18 +32,9 @@ _omw_app_install_autojump() {
 	if ! SHELL="$installer_shell" "./install.py" >/dev/null; then
 		popd >/dev/null
 		omw_log "autojump installation failed." "ERROR"
-		if [[ -e "$HOME/.autojump" ]]; then
-			mkdir -p "$OMW_HOME/backups/autojump"
-			mv "$HOME/.autojump" "$OMW_HOME/backups/autojump/failed-$(date +%Y%m%d%H%M%S)"
-		fi
-		[[ -n "$backup_dir" && -e "$backup_dir" ]] && mv "$backup_dir" "$HOME/.autojump"
 		return 1
 	fi
 	popd >/dev/null
-	if [[ -n "$backup_dir" && -e "$backup_dir" ]]; then
-		mkdir -p "$OMW_HOME/backups/autojump"
-		mv "$backup_dir" "$OMW_HOME/backups/autojump/$(basename "$backup_dir")"
-	fi
 	# add source autojump to shell config
 	local zshrc="$HOME/.zshrc"
 	[[ -e "$zshrc" ]] || : >"$zshrc"
@@ -196,18 +184,20 @@ omw_app_install_status() {
 	install_dir=$(omw_app_install_dir "$app" "$version")
 	local symlink_path="${exec_name:+$SCRIPTS_BIN_PATH/$exec_name}"
 	local status_func="_omw_app_status_$app"
+	local actual
 
 	if declare -F "$status_func" >/dev/null; then
-		"$status_func" "$install_dir"
+		actual=$("$status_func" "$install_dir")
 	elif [[ -n "$bin_dirs" ]]; then
-		_omw_app_bin_dir_install_status "$app" "$install_dir"
+		actual=$(_omw_app_bin_dir_install_status "$app" "$install_dir")
 	elif [[ -n "$symlink_path" && -L "$symlink_path" && -d "$install_dir" ]]; then
-		printf 'installed'
+		actual=installed
 	elif [[ ( -n "$symlink_path" && -L "$symlink_path" ) || -d "$install_dir" ]]; then
-		printf 'partial'
+		actual=partial
 	else
-		printf 'available'
+		actual=available
 	fi
+	omw_receipt_state app "$app" "$version" "$actual"
 }
 
 omw_app_definition_ready() {
@@ -223,6 +213,7 @@ _omw_app_install_hack-nerd-font() {
 	local install_dir="$2"
 	local font_dir="$HOME/.local/share/fonts/OMW/HackNerdFont"
 	local font_count
+	omw_tx_backup_if_active "$font_dir" || return 1
 
 	if omw_hack_nerd_font_installed; then
 		omw_log "Hack Nerd Font is already available." "SUCCESS"
@@ -278,7 +269,6 @@ omw_install_app() {
 	pkg_path=$(omw_app_package_path "$url")
 	local bin_dirs="${APP_BIN_DIRS[$appname]:-}"
 	local symlink_path="${exec_name:+$SCRIPTS_BIN_PATH/$exec_name}"
-	local old_symlink_target=""
 	local stage_dir="$BUILDS_PATH/.tmp-$$-app-$appname"
 
 	omw_log "--- Installing App: $appname $version ---" "INFO"
@@ -286,39 +276,52 @@ omw_install_app() {
 		omw_log "$appname already installed. Skipping." "INFO"
 		return 0
 	fi
-	if [[ "$force" == "false" && "$(omw_app_install_status "$appname")" == "installed" ]]; then
+	if [[ "$force" == "false" && "$(omw_app_install_status "$appname")" =~ ^(installed|legacy)$ ]]; then
 		omw_log "$appname already installed. Skipping." "INFO"
 		return 0
 	fi
 	if [[ "$force" == "true" ]]; then
 		omw_log "Force reinstall for $appname." "WARN"
-		if [[ -n "$exec_name" && -z "$bin_dirs" ]]; then
-			[[ -L "$symlink_path" ]] && old_symlink_target=$(readlink "$symlink_path")
-			rm -f "$symlink_path"
-		fi
 	fi
 	omw_safe_rm_rf "$stage_dir"
 	if ! omw_download_package "$url" "$pkg_path" || ! omw_extract_package "$pkg_path" "$stage_dir" 0; then
 		omw_safe_rm_rf "$stage_dir"
-		[[ -n "$old_symlink_target" ]] && ln -sf "$old_symlink_target" "$symlink_path"
 		return 1
 	fi
 	omw_tx_begin || {
 		omw_safe_rm_rf "$stage_dir"
-		[[ -n "$old_symlink_target" ]] && ln -sf "$old_symlink_target" "$symlink_path"
 		return 1
 	}
 	omw_tx_track_internal_tmp "$stage_dir" || {
 		omw_tx_rollback
-		[[ -n "$old_symlink_target" ]] && ln -sf "$old_symlink_target" "$symlink_path"
 		return 1
 	}
 	omw_tx_backup_internal "$install_dir" || {
 		omw_tx_rollback
-		[[ -n "$old_symlink_target" ]] && ln -sf "$old_symlink_target" "$symlink_path"
 		return 1
 	}
+	if [[ -n "$symlink_path" ]]; then
+		omw_tx_backup_path "$symlink_path" || {
+			omw_tx_rollback
+			return 1
+		}
+	fi
+	if [[ "$appname" == "autojump" ]]; then
+		omw_tx_backup_path "$HOME/.autojump" || { omw_tx_rollback; return 1; }
+		omw_tx_backup_path "$HOME/.zshrc" || { omw_tx_rollback; return 1; }
+	elif [[ "$appname" == "hack-nerd-font" ]]; then
+		omw_tx_backup_path "$HOME/.local/share/fonts/OMW" || { omw_tx_rollback; return 1; }
+	fi
+	mkdir -p "$SCRIPTS_BIN_PATH" || { omw_tx_rollback; return 1; }
 	mv "$stage_dir" "$install_dir"
+	if [[ -n "$bin_dirs" ]]; then
+		while IFS= read -r -d $'\0' entry; do
+			omw_tx_backup_internal "$SCRIPTS_BIN_PATH/$(basename "$entry")" || {
+				omw_tx_rollback
+				return 1
+			}
+		done < <(_omw_app_find_bin_dir_entries "$install_dir" "$bin_dirs")
+	fi
 
 	# Resolve the declared installation strategy.
 	local install_status=0
@@ -337,10 +340,13 @@ omw_install_app() {
 	fi
 	if ((install_status != 0)); then
 		omw_tx_rollback
-		[[ -n "$old_symlink_target" ]] && ln -sf "$old_symlink_target" "$symlink_path"
 		return "$install_status"
 	fi
-	omw_tx_commit
+	omw_write_receipt app "$appname" "$version" "$pkg_path" || {
+		omw_tx_rollback
+		return 1
+	}
+	omw_tx_commit || return 1
 	omw_log "$appname installation complete." "SUCCESS"
 }
 

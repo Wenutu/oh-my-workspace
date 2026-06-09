@@ -7,12 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-09
+
+### Changed
+
+- Split runtime initialization into read-only and mutating modes.
+- Kept the offline bundle contract at format v2 with fast MD5 integrity checks.
+- Added strict bundle metadata and manifest validation.
+- Added explicit build and upgrade execution plans.
+- Extended transactions to approved HOME paths and persisted interrupted transaction journals.
+- Added installation receipts with installed, legacy, and partial state reporting.
+- Enhanced `omw update check` with colored and precise results for source software, apps, Node packages, Coc extensions, and Vim Git plugins.
+- Made upgrades transactionally replace the installed Bundle v2 metadata and manifest control files.
+
+### Package Updates
+
+- Updated Vim from `9.2.0586` to `9.2.0604`.
+- Updated Codex from `0.135.0` to `0.138.0`.
+- Updated Claude Code from `2.1.150` to `2.1.169`.
+
 ### Removed
 
 - Unused lib/\*.sh code.
 - Outdated README.md descriptions.
 
-## [0.1.0] - 2025-06-08
+[0.2.0]: https://github.com/shiwentao/oh-my-workspace/releases/tag/v0.2.0
+
+## [0.1.0] - 2026-06-08
 
 ### Added
 

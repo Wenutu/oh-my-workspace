@@ -380,7 +380,6 @@ omw_create_offline_bundle() {
 	local archive_name
 	archive_name="omw-offline-bundle-v${OMW_VERSION}.tar.gz"
 	omw_log "Step 6: Creating final archive: $archive_name"
-	cd "$OMW_HOME"
 	local archive_path="$OMW_HOME/$archive_name"
 	local tmp_archive="$OMW_HOME/.${archive_name}.tmp"
 	local staging_dir="$BUILDS_PATH/.offline-bundle-$$"

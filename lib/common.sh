@@ -14,11 +14,76 @@ omw_log() {
 	fi
 }
 
+omw_receipt_path() {
+	local kind="$1" name="$2" version="${3:-}"
+	case "$kind" in
+	software) printf '%s/software/%s/%s.receipt\n' "$RECEIPTS_PATH" "$name" "$version" ;;
+	app | node | config) printf '%s/%s/%s.receipt\n' "$RECEIPTS_PATH" "$kind" "$name" ;;
+	*) return 1 ;;
+	esac
+}
+
+omw_receipt_valid() {
+	local path="$1"
+	[[ -f "$path" && ! -L "$path" ]] || return 1
+	awk -F= '
+		! /^[a-z_]+=[^[:cntrl:]]*$/ { exit 1 }
+		{ count[$1]++; value[$1]=$2 }
+		END {
+			required["receipt_format"]; required["kind"]; required["name"]; required["version"]
+			required["omw_version"]; required["installed_at"]; required["source_md5"]; required["status"]
+			for (key in required) if (count[key] != 1) exit 1
+			if (value["receipt_format"] != "1" || value["status"] != "complete") exit 1
+		}
+	' "$path"
+}
+
+omw_receipt_state() {
+	local kind="$1" name="$2" version="$3" actual="$4" path
+	path=$(omw_receipt_path "$kind" "$name" "$version") || return 1
+	if [[ -e "$path" || -L "$path" ]]; then
+		if omw_receipt_valid "$path" && [[ "$actual" == "installed" ]]; then
+			printf 'installed'
+		else
+			printf 'partial'
+		fi
+	elif [[ "$actual" == "installed" ]]; then
+		printf 'legacy'
+	else
+		printf '%s' "$actual"
+	fi
+}
+
+omw_write_receipt() {
+	local kind="$1" name="$2" version="${3:-}" source="${4:-}"
+	local path tmp source_md5=""
+	path=$(omw_receipt_path "$kind" "$name" "$version") || return 1
+	[[ -z "$source" || ! -f "$source" ]] || source_md5=$(omw_file_md5 "$source") || return 1
+	mkdir -p "$(dirname "$path")" || return 1
+	tmp="${path}.tmp-$$"
+	{
+		printf 'receipt_format=1\nkind=%s\nname=%s\nversion=%s\n' "$kind" "$name" "$version"
+		printf 'omw_version=%s\ninstalled_at=%s\nsource_md5=%s\nstatus=complete\n' "$OMW_VERSION" "$(date +%Y%m%d%H%M%S)" "$source_md5"
+	} >"$tmp" || return 1
+	omw_tx_backup_if_active "$path" || { rm -f "$tmp"; return 1; }
+	mv -f "$tmp" "$path"
+}
+
 omw_init_globals() {
-	OMW_HOME=$(cd "$OMW_HOME" && pwd)
-	cd "$OMW_HOME"
+	local mode="${1:-write}"
+	local dir conf_file core_count
+
+	case "$mode" in
+	read | write) ;;
+	*)
+		omw_log "Unknown initialization mode: $mode" "ERROR"
+		return 1
+		;;
+	esac
+	OMW_HOME=$(builtin cd "$OMW_HOME" && builtin pwd)
 	declare -g -a SOFTWARE_LIST SOFTWARE_BUILD_ALL_EXCLUDES APP_LIST NODE_PACKAGE_LIST NODE_CACHE_PACKAGE_LIST CONFIG_BACKUP_PATHS CONFIG_TARGET_LIST
-	declare -g -a OMW_TX_TMP_PATHS OMW_TX_INTERNAL_PATHS OMW_TX_INTERNAL_BACKUPS
+	declare -g -a OMW_TX_TMP_PATHS OMW_TX_PATHS OMW_TX_BACKUPS OMW_TX_SCOPES
+	declare -g -a OMW_UPGRADE_PLAN_ACTIONS OMW_UPGRADE_PLAN_LABELS OMW_UPGRADE_PLAN_SOURCES OMW_UPGRADE_PLAN_DESTS OMW_UPGRADE_PLAN_POLICIES
 	declare -g -A SOFTWARE_VERSIONS SOFTWARE_URLS SOFTWARE_DEPS SOFTWARE_CONFIG_CMDS SOFTWARE_CFLAGS SOFTWARE_LDFLAGS
 	declare -g -A APP_VERSIONS APP_URLS APP_EXECUTABLE_NAME APP_SOURCE_URLS APP_BIN_DIRS
 	declare -g -A NODE_PACKAGE_NAMES NODE_PACKAGE_VERSIONS NODE_PACKAGE_BINS NODE_PACKAGE_NODE_VERSIONS
@@ -38,19 +103,23 @@ omw_init_globals() {
 	MODULEFILES_PATH="$OMW_HOME/tools/modulefiles"
 	APPS_INSTALL_PATH="$OMW_HOME/apps"
 	SCRIPTS_BIN_PATH="$OMW_HOME/bin"
+	STATE_PATH="$OMW_HOME/state"
+	RECEIPTS_PATH="$STATE_PATH/receipts"
+	TRANSACTIONS_PATH="$STATE_PATH/transactions"
 	CONFIG_TARGET_LIST=(tmux vim zsh)
 
-	# Ensure core directories exist
-	readonly DIRECTORIES=(
+	DIRECTORIES=(
 		"$CONFIG_PATH" "$CONFIG_LOCAL_PATH" "$PACKAGES_PATH"
-		"$BUILDS_PATH" "$SOFTWARE_INSTALL_PATH" "$MODULEFILES_PATH" "$APPS_INSTALL_PATH" "$SCRIPTS_BIN_PATH"
+		"$BUILDS_PATH" "$SOFTWARE_INSTALL_PATH" "$MODULEFILES_PATH" "$APPS_INSTALL_PATH" "$SCRIPTS_BIN_PATH" "$STATE_PATH"
 	)
-	for dir in "${DIRECTORIES[@]}"; do
-		[[ ! -d "$dir" ]] && mkdir -p "$dir"
-	done
+	if [[ "$mode" == "write" ]]; then
+		for dir in "${DIRECTORIES[@]}"; do
+			[[ -d "$dir" ]] || mkdir -p "$dir" || return 1
+		done
+	fi
 
 	# Load software definitions from configuration file
-	local conf_file="$OMW_HOME/packages.sh"
+	conf_file="$OMW_HOME/packages.sh"
 	if [[ -f "$conf_file" ]]; then
 		omw_log "Loading definitions from $conf_file" "INFO"
 		local VERSION='${VERSION}'
@@ -59,11 +128,10 @@ omw_init_globals() {
 		_omw_common_validate_config
 	else
 		omw_log "Configuration file not found: $conf_file. Cannot proceed." "ERROR"
-		exit 1
+		return 1
 	fi
 
 	# Set build-related constants
-	local core_count
 	if command -v nproc &>/dev/null; then
 		core_count=$(nproc)
 	elif command -v sysctl &>/dev/null; then
@@ -72,19 +140,20 @@ omw_init_globals() {
 		core_count=1
 	fi
 	if ((core_count > 2)); then
-		readonly BUILD_JOBS=$((core_count - 2))
+		BUILD_JOBS=$((core_count - 2))
 	else
-		readonly BUILD_JOBS=1
+		BUILD_JOBS=1
 	fi
 
-	readonly MAX_RETRIES=3
-	readonly DOWNLOAD_TIMEOUT=300
-	readonly GCC_PREREQ_BASE_URL='http://gcc.gnu.org/pub/gcc/infrastructure/'
+	MAX_RETRIES=3
+	DOWNLOAD_TIMEOUT=300
+	GCC_PREREQ_BASE_URL='http://gcc.gnu.org/pub/gcc/infrastructure/'
 	CONFIG_BACKUP_PATHS=()
 	OMW_TX_ACTIVE=false
 	OMW_TX_TMP_PATHS=()
-	OMW_TX_INTERNAL_PATHS=()
-	OMW_TX_INTERNAL_BACKUPS=()
+	OMW_TX_PATHS=()
+	OMW_TX_BACKUPS=()
+	OMW_TX_SCOPES=()
 	return 0
 }
 
@@ -458,10 +527,14 @@ omw_safe_link_with_backup() {
 	if [[ -L "$dest" ]]; then
 		current_target=$(readlink "$dest")
 		[[ "$current_target" == "$source" ]] && return 0
+		omw_tx_backup_if_active "$dest" || return 1
 		rm -f "$dest"
 	elif [[ -e "$dest" ]]; then
+		omw_tx_backup_if_active "$dest" || return 1
 		omw_backup_path_for_config "$dest" "$reason"
 		_omw_common_move_external_aside "$dest" "$reason"
+	else
+		omw_tx_backup_if_active "$dest" || return 1
 	fi
 
 	ln -s "$source" "$dest"
@@ -476,6 +549,7 @@ omw_append_line_with_backup() {
 	if [[ -f "$file" ]] && grep -q "$marker" "$file"; then
 		return 0
 	fi
+	omw_tx_backup_if_active "$file" || return 1
 	[[ -e "$file" || -L "$file" ]] && omw_backup_path_for_config "$file" "$reason"
 	printf '%s\n' "$content" >>"$file"
 }

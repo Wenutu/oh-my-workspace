@@ -81,8 +81,14 @@ Run `./omw --help` for the compact command overview or
 
 - `./omw status [installed]`: Show installable items or limit the view to installed items.
 - `./omw doctor [profile]`: Check local OMW runtime health without modifying files.
-- `./omw update check`: Check supported upstream versions.
+- `./omw update check`: Check source software, apps, Node packages, Coc extensions, and Vim Git plugins for upstream updates.
 - `./omw clean <builds|packages|config|installs|apps|node|all> [--dry-run]`: Remove or preview generated artifacts. The `all` target preserves deployment packages so `./omw all` can restore the workspace. Use `packages` to remove downloaded and packed caches.
+
+`update check` compares pinned package versions with compatible upstream releases
+and npm `latest` versions. Vim Git plugins compare the prepared local commit with
+the declared remote branch or remote HEAD. Results distinguish `current`,
+`available`, `unsupported`, `error`, and `missing`; colors can be disabled with
+`--no-color`.
 
 Common options:
 
@@ -92,6 +98,10 @@ Common options:
 - `--replace-packages`: Replace `packages/` during `upgrade` instead of merging bundle assets.
 - `--no-color`: Disable colored output.
 - `--version`: Show the OMW version.
+
+`status` reports receipt-backed installations as `installed`, compatible
+pre-receipt installations as `legacy`, and inconsistent installations as
+`partial`.
 
 Examples:
 
@@ -195,6 +205,13 @@ bundle assets into `packages/`, then switches `VERSION` last. It never replaces
 `packages/config-<target>-$OMW_VERSION.tar.gz` archives by `./omw config` or
 `./omw all`, so `config/local/` remains untouched.
 
+The upgrade also transactionally replaces `.omw-bundle-meta` and
+`.omw-bundle-manifest` in the workspace root with the control files from the
+bundle being installed after managed content and packages are updated, but
+before `VERSION` activates the new runtime. These control files are intentionally
+excluded from the manifest itself, so they are always adopted from the current
+bundle.
+
 `--dry-run` prints the same upgrade plan used by the real execution path,
 including source and target paths, manifest summaries, per-path policies, and
 the decision for each managed path. New bundles must include
@@ -204,6 +221,10 @@ manifest is a tab-delimited v2 format that records files, directories, symlinks,
 file md5s, and modes without using JSON. Unchanged paths are skipped during
 real execution. If an upgrade step fails, OMW rolls back the transaction before
 returning.
+
+Bundle format v2 intentionally uses MD5 for fast accidental-corruption
+detection. It does not authenticate the bundle publisher and is not a security
+signature.
 
 By default, `packages/` is merged through a staged replacement: OMW copies the
 current package cache into a temporary directory, overlays bundle entries whose
@@ -328,12 +349,13 @@ packages and performs the same generated config cleanup for compatibility.
 - tools/modulefiles/ Generated modulefiles
 - apps/ Installed app payloads
 - bin/ Symlinks for installed apps
+- state/ Local installation receipts and recoverable transaction journals; excluded from bundles
 
 Implementation modules under `lib/` are grouped by responsibility:
 
 - common.sh: initialization, logging, config validation, shared backup/link helpers
 - fs.sh: safe filesystem operations, downloads, archive extraction, archive checks
-- tx.sh: transactional backup, rollback, commit, and temporary path cleanup
+- tx.sh: transactional backup, rollback, commit, HOME-path protection, and interrupted transaction recovery
 - registry.sh: package URL rendering and registry lookups from `packages.sh`
 - workflow.sh: high-level command workflows such as `all`, build-all, config-all, and clean
 - doctor.sh: local runtime health checks

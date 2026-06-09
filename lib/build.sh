@@ -355,7 +355,84 @@ omw_parse_target() {
 	echo "$appname $version"
 }
 
+_omw_build_plan_visit() {
+	local target="$1"
+	local state="${OMW_BUILD_PLAN_STATE[$target]:-}"
+	local appname version dep
+	case "$state" in
+	visiting)
+		omw_log "Software dependency cycle detected while planning: $target" "ERROR"
+		return 1
+		;;
+	visited) return 0 ;;
+	esac
+	read -r appname version < <(omw_parse_target "$target")
+	[[ -n "$appname" && -n "$version" && -n "${SOFTWARE_VERSIONS[$appname]:-}" ]] || {
+		omw_log "Build plan contains an unknown target: $target" "ERROR"
+		return 1
+	}
+	omw_contains_word "$version" "${SOFTWARE_VERSIONS[$appname]}" || {
+		omw_log "Build plan contains an undefined version: $target" "ERROR"
+		return 1
+	}
+	OMW_BUILD_PLAN_STATE["$target"]=visiting
+	for dep in ${SOFTWARE_DEPS[$target]:-}; do
+		_omw_build_plan_visit "$dep" || return 1
+	done
+	OMW_BUILD_PLAN_STATE["$target"]=visited
+	OMW_BUILD_PLAN+=("$target")
+}
+
+omw_build_plan() {
+	local target="$1" item
+	declare -g -a OMW_BUILD_PLAN=()
+	declare -g -A OMW_BUILD_PLAN_STATE=()
+	OMW_BUILD_PLAN_ROOT="$target"
+	_omw_build_plan_visit "$target" || return 1
+	omw_log "Build execution plan: ${OMW_BUILD_PLAN[*]}" "INFO"
+	for item in "${OMW_BUILD_PLAN[@]}"; do
+		[[ -n "$item" ]] || return 1
+	done
+}
+
+_omw_build_restore_modules() {
+	local module_name
+	module purge >/dev/null 2>&1 || return 1
+	for module_name in ${OMW_BUILD_ORIGINAL_MODULES:-}; do
+		module load "$module_name" >/dev/null 2>&1 || return 1
+	done
+}
+
+_omw_build_execute_plan() {
+	local force="$1" refresh="$2" target dep dep_name dep_version status=0
+	omw_ensure_module_command || return 1
+	OMW_BUILD_ORIGINAL_MODULES=$(module -t list 2>&1 | grep -v '^No Modulefiles Currently Loaded' || true)
+	for target in "${OMW_BUILD_PLAN[@]}"; do
+		module purge || { status=1; break; }
+		for dep in ${SOFTWARE_DEPS[$target]:-}; do
+			read -r dep_name dep_version < <(omw_parse_target "$dep")
+			module load "$dep_name/$dep_name-$dep_version" || { status=1; break; }
+		done
+		((status == 0)) || break
+		if [[ "$target" == "$OMW_BUILD_PLAN_ROOT" ]]; then
+			_omw_build_software_one "$target" "$force" "$refresh" || { status=$?; break; }
+		else
+			_omw_build_software_one "$target" false false || { status=$?; break; }
+		fi
+	done
+	_omw_build_restore_modules || status=1
+	return "$status"
+}
+
 omw_build_software() {
+	local target_str="$1"
+	local force="${2:-false}"
+	local refresh="${3:-false}"
+	omw_build_plan "$target_str" || return 1
+	_omw_build_execute_plan "$force" "$refresh"
+}
+
+_omw_build_software_one() {
 	local target_str="$1" # e.g., "python@3.11.12" or "local"
 	local force="${2:-false}"
 	local refresh="${3:-false}"
@@ -364,7 +441,7 @@ omw_build_software() {
 	read -r appname version < <(omw_parse_target "$target_str")
 
 	if [[ "$appname" == "local" ]]; then
-		omw_build_local "$force" "$refresh" "${SOFTWARE_VERSIONS[local]}"
+		omw_build_local "$force" "$refresh" "$version"
 		return $?
 	fi
 	if [[ -z "${SOFTWARE_VERSIONS[$appname]:-}" ]]; then
@@ -389,26 +466,6 @@ omw_build_software() {
 		fi
 		omw_log "$appname@$version modulefile refreshed." "SUCCESS"
 		return 0
-	fi
-
-	# Dependency resolution now respects specific versions
-	local deps="${SOFTWARE_DEPS["$appname@$version"]}"
-	if [[ -n "$deps" ]]; then
-		omw_log "Processing dependencies for $appname@$version: $deps" "DEBUG"
-		local dep_target # e.g., "python@3.11.12"
-		for dep_target in $deps; do
-			local dep_name dep_version
-			read -r dep_name dep_version < <(omw_parse_target "$dep_target")
-			# Recursively call omw_build_software with the versioned dependency
-			if ! omw_build_software "$dep_target"; then
-				return 1
-			fi
-			omw_log "Loading module for dependency: $dep_name/$dep_name-${dep_version}" "INFO"
-			omw_ensure_module_command
-			if ! module load "$dep_name/$dep_name-${dep_version}"; then
-				return 1
-			fi
-		done
 	fi
 
 	local prefix
@@ -443,6 +500,10 @@ omw_build_software() {
 		omw_tx_rollback
 		return 1
 	}
+	omw_tx_backup_internal "$(omw_software_modulefile "$appname" "$version")" || {
+		omw_tx_rollback
+		return 1
+	}
 
 	# Use a declared command when present; otherwise require the conventional hook.
 	local build_func="_omw_build_$appname"
@@ -470,11 +531,12 @@ omw_build_software() {
 		return 1
 	fi
 
-	if ! _omw_build_write_modulefile "$appname" "$version"; then
+	if ! _omw_build_write_modulefile "$appname" "$version" ||
+		! omw_write_receipt software "$appname" "$version" "$pkg_path"; then
 		omw_tx_rollback
 		return 1
 	fi
-	omw_tx_commit
+	omw_tx_commit || return 1
 	omw_log "$appname@$version build process completed." "SUCCESS"
 }
 
@@ -555,6 +617,10 @@ omw_build_local() {
 		omw_tx_rollback
 		return 1
 	}
+	omw_tx_backup_internal "$(omw_software_modulefile local "$version")" || {
+		omw_tx_rollback
+		return 1
+	}
 
 	if ! omw_prepare_local_rpm_bundle "$version"; then
 		omw_tx_rollback
@@ -605,7 +671,11 @@ omw_build_local() {
 		omw_tx_rollback
 		return 1
 	fi
-	omw_tx_commit
+	omw_write_receipt software local "$version" "$(omw_local_rpm_bundle_path "$version")" || {
+		omw_tx_rollback
+		return 1
+	}
+	omw_tx_commit || return 1
 }
 
 omw_prepare_local_rpm_bundle() {

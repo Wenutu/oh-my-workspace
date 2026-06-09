@@ -55,6 +55,10 @@ _omw_config_write_vimrc() {
 		return 0
 	fi
 
+	omw_tx_backup_if_active "$vimrc" || {
+		rm -f "$tmp_vimrc"
+		return 1
+	}
 	[[ -e "$vimrc" || -L "$vimrc" ]] && omw_backup_path_for_config "$vimrc" "vim"
 	rm -f "$vimrc"
 	mv "$tmp_vimrc" "$vimrc"
@@ -90,6 +94,7 @@ omw_restore_config_package() {
 		omw_safe_rm_rf "$stage_dir"
 		return 1
 	fi
+	omw_tx_backup_if_active "$target_dir" || return 1
 	omw_safe_rm_rf "$target_dir"
 	mv "$stage_dir/$target" "$target_dir"
 	omw_safe_rm_rf "$stage_dir"
@@ -148,6 +153,7 @@ _omw_config_apply_zsh() {
 	fi
 
 	omw_safe_link_with_backup "$cfg_dir/.oh-my-zsh" "$HOME/.oh-my-zsh" "zsh"
+	omw_tx_backup_if_active "$zshrc" || return 1
 	[[ -e "$zshrc" || -L "$zshrc" ]] && omw_backup_path_for_config "$zshrc" "zsh"
 	rm -f "$zshrc"
 	cp "$cfg_dir/.oh-my-zsh/templates/zshrc.zsh-template" "$zshrc"
@@ -451,7 +457,7 @@ omw_prepare_config_for_package() {
 		omw_tx_rollback
 		return 1
 	fi
-	omw_tx_commit
+	omw_tx_commit || return 1
 }
 
 omw_configure() {
@@ -465,9 +471,24 @@ omw_configure() {
 		return 1
 	fi
 	omw_log "Configuring $target..."
-	_omw_config_ensure_local_files || return 1
-	omw_restore_config_package "$target" || return 1
-	"$apply_func" || return 1
+	omw_tx_begin || return 1
+	[[ -e "$CONFIG_LOCAL_PATH/tmux.local" || -L "$CONFIG_LOCAL_PATH/tmux.local" ]] ||
+		omw_tx_backup_internal "$CONFIG_LOCAL_PATH/tmux.local" || { omw_tx_rollback; return 1; }
+	[[ -e "$CONFIG_LOCAL_PATH/zshrc.local" || -L "$CONFIG_LOCAL_PATH/zshrc.local" ]] ||
+		omw_tx_backup_internal "$CONFIG_LOCAL_PATH/zshrc.local" || { omw_tx_rollback; return 1; }
+	[[ -e "$CONFIG_LOCAL_PATH/vimrc.local" || -L "$CONFIG_LOCAL_PATH/vimrc.local" ]] ||
+		omw_tx_backup_internal "$CONFIG_LOCAL_PATH/vimrc.local" || { omw_tx_rollback; return 1; }
+	if ! _omw_config_ensure_local_files || ! omw_restore_config_package "$target" || ! "$apply_func"; then
+		omw_tx_rollback
+		return 1
+	fi
+	if _omw_config_package_was_restored "$target"; then
+		omw_write_receipt config "$target" "$OMW_VERSION" "$(omw_config_package_path "$target")" || {
+			omw_tx_rollback
+			return 1
+		}
+	fi
+	omw_tx_commit || return 1
 	omw_log "$target configuration complete." "SUCCESS"
 	omw_print_config_backup_paths
 }
@@ -476,8 +497,13 @@ omw_init_shell_env() {
 	local bashrc="$HOME/.bashrc"
 
 	omw_log "Initializing OMW shell environment..." "INFO"
+	omw_tx_begin || return 1
 	# shellcheck disable=SC2016
-	omw_append_line_with_backup "$bashrc" "$OMW_HOME/env.sh" "$(printf '\n# OMW Config\n[[ -f "%s/env.sh" ]] && source "%s/env.sh"' "$OMW_HOME" "$OMW_HOME")" "bash"
+	if ! omw_append_line_with_backup "$bashrc" "$OMW_HOME/env.sh" "$(printf '\n# OMW Config\n[[ -f "%s/env.sh" ]] && source "%s/env.sh"' "$OMW_HOME" "$OMW_HOME")" "bash"; then
+		omw_tx_rollback
+		return 1
+	fi
+	omw_tx_commit || return 1
 	omw_log "OMW environment source line is configured in $bashrc" "SUCCESS"
 	omw_log "Please restart your terminal or run 'source $bashrc' to apply the changes." "SUCCESS"
 }
