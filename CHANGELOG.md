@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Unused lib/\*.sh code.
 - Outdated README.md descriptions.
 
-[0.2.0]: https://github.com/shiwentao/oh-my-workspace/releases/tag/v0.2.0
+[0.2.0]: https://github.com/Wenutu/oh-my-workspace/releases/tag/v0.2.0
 
 ## [0.1.0] - 2026-06-08
 
@@ -62,4 +62,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bilingual docs: README, resources, vim configuration guides (EN & CN)
 - Built-in `omw help <command>` for every registered subcommand
 
-[0.1.0]: https://github.com/shiwentao/oh-my-workspace/releases/tag/v0.1.0
+[0.1.0]: https://github.com/Wenutu/oh-my-workspace/releases/tag/v0.1.0
