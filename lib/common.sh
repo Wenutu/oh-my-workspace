@@ -18,7 +18,7 @@ omw_init_globals() {
 	OMW_HOME=$(cd "$OMW_HOME" && pwd)
 	cd "$OMW_HOME"
 	declare -g -a SOFTWARE_LIST SOFTWARE_BUILD_ALL_EXCLUDES APP_LIST NODE_PACKAGE_LIST NODE_CACHE_PACKAGE_LIST CONFIG_BACKUP_PATHS CONFIG_TARGET_LIST
-	declare -g -a OMW_TX_TMP_PATHS OMW_TX_INTERNAL_PATHS OMW_TX_INTERNAL_BACKUPS OMW_TX_EXTERNAL_PATHS OMW_TX_EXTERNAL_BACKUPS
+	declare -g -a OMW_TX_TMP_PATHS OMW_TX_INTERNAL_PATHS OMW_TX_INTERNAL_BACKUPS
 	declare -g -A SOFTWARE_VERSIONS SOFTWARE_URLS SOFTWARE_DEPS SOFTWARE_CONFIG_CMDS SOFTWARE_CFLAGS SOFTWARE_LDFLAGS
 	declare -g -A APP_VERSIONS APP_URLS APP_EXECUTABLE_NAME APP_SOURCE_URLS APP_BIN_DIRS
 	declare -g -A NODE_PACKAGE_NAMES NODE_PACKAGE_VERSIONS NODE_PACKAGE_BINS NODE_PACKAGE_NODE_VERSIONS
@@ -85,8 +85,6 @@ omw_init_globals() {
 	OMW_TX_TMP_PATHS=()
 	OMW_TX_INTERNAL_PATHS=()
 	OMW_TX_INTERNAL_BACKUPS=()
-	OMW_TX_EXTERNAL_PATHS=()
-	OMW_TX_EXTERNAL_BACKUPS=()
 	return 0
 }
 
@@ -352,24 +350,12 @@ omw_app_package_path() {
 	printf '%s/%s' "$PACKAGES_PATH" "$(basename "$url")"
 }
 
-omw_config_release_path() {
-	printf '%s' "$CONFIG_RELEASE_PATH"
-}
-
 omw_config_source_target_dir() {
 	printf '%s/%s' "$CONFIG_PATH" "$1"
 }
 
 omw_config_runtime_target_dir() {
 	printf '%s/%s' "$CONFIG_RELEASE_PATH" "$1"
-}
-
-omw_config_local_path() {
-	printf '%s' "$CONFIG_LOCAL_PATH"
-}
-
-omw_config_target_dir() {
-	omw_config_runtime_target_dir "$1"
 }
 
 omw_software_build_all_enabled() {
@@ -481,39 +467,6 @@ omw_safe_link_with_backup() {
 	ln -s "$source" "$dest"
 }
 
-omw_link_if_absent_with_backup() {
-	local source="$1"
-	local dest="$2"
-	local reason="${3:-config}"
-
-	if [[ -L "$dest" ]]; then
-		[[ "$(readlink "$dest")" == "$source" ]] && return 0
-		omw_backup_path_for_config "$dest" "$reason"
-		omw_log "Keeping existing symlink $dest unchanged." "INFO"
-		return 0
-	elif [[ -e "$dest" ]]; then
-		omw_backup_path_for_config "$dest" "$reason"
-		omw_log "Keeping existing $dest unchanged." "INFO"
-		return 0
-	fi
-
-	ln -s "$source" "$dest"
-}
-
-omw_copy_if_absent_with_backup() {
-	local source="$1"
-	local dest="$2"
-	local reason="${3:-config}"
-
-	if [[ -e "$dest" || -L "$dest" ]]; then
-		omw_backup_path_for_config "$dest" "$reason"
-		omw_log "Keeping existing $dest unchanged." "INFO"
-		return 0
-	fi
-
-	cp "$source" "$dest"
-}
-
 omw_append_line_with_backup() {
 	local file="$1"
 	local marker="$2"
@@ -553,103 +506,6 @@ omw_contains_word() {
 	done
 	return 1
 }
-omw_clone_repo_once() {
-	local url="$1"
-	local dest="$2"
-	local backup_dest=""
-	local clone_log=""
-	if [[ -d "$dest/.git" ]]; then
-		omw_log "Repository exists: $dest" "INFO"
-		return 0
-	fi
-	if [[ -d "$dest" ]] && find "$dest" -mindepth 1 -print -quit | grep -q .; then
-		omw_log "Using existing non-git directory as an offline copy: $dest" "WARN"
-		return 0
-	fi
-	if [[ -e "$dest" ]]; then
-		backup_dest="${dest}.backup-$(date +%Y%m%d%H%M%S)"
-		omw_log "Destination exists but is not a usable git repo copy: $dest; moving it to $backup_dest." "WARN"
-		mv "$dest" "$backup_dest"
-	fi
-	local tmp_dest="${dest}.tmp-$$"
-	omw_safe_rm_rf "$tmp_dest"
-	clone_log=$(mktemp)
-	local clone_success=false
-	for ((i = 1; i <= MAX_RETRIES; i++)); do
-		: >"$clone_log"
-		if GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$url" "$tmp_dest" 2>"$clone_log"; then
-			clone_success=true
-			break
-		fi
-		omw_log "Git clone attempt $i failed. Retrying..." "WARN"
-		omw_safe_rm_rf "$tmp_dest"
-	done
-	if [[ "$clone_success" == "false" ]]; then
-		omw_log "Git clone failed for $url after $MAX_RETRIES attempts. Last output:" "WARN"
-		cat "$clone_log" >&2
-		omw_safe_rm_rf "$tmp_dest"
-		rm -f "$clone_log"
-		if _omw_common_fetch_github_repo_snapshot "$url" "$dest"; then
-			[[ -n "$backup_dest" ]] && omw_log "Previous non-git destination was kept at $backup_dest." "WARN"
-			return 0
-		fi
-		if [[ -n "$backup_dest" && -e "$backup_dest" && ! -e "$dest" ]]; then
-			omw_log "Restoring previous non-git destination after fetch failure: $dest" "WARN"
-			mv "$backup_dest" "$dest"
-		fi
-		return 1
-	fi
-	rm -f "$clone_log"
-	mv "$tmp_dest" "$dest"
-	[[ -n "$backup_dest" ]] && omw_log "Previous non-git destination was kept at $backup_dest." "WARN"
-	return 0
-}
-
-_omw_common_github_archive_url() {
-	local url="$1"
-	local owner repo
-
-	if [[ "$url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
-		owner="${BASH_REMATCH[1]}"
-		repo="${BASH_REMATCH[2]%.git}"
-		printf 'https://github.com/%s/%s/archive/HEAD.tar.gz' "$owner" "$repo"
-	fi
-}
-
-_omw_common_github_archive_cache_path() {
-	local url="$1"
-	local owner repo safe_repo
-
-	if [[ "$url" =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?$ ]]; then
-		owner="${BASH_REMATCH[1]}"
-		repo="${BASH_REMATCH[2]%.git}"
-		safe_repo="${repo//[^A-Za-z0-9._-]/_}"
-		printf '%s/%s-%s-HEAD.tar.gz' "$PACKAGES_PATH" "$owner" "$safe_repo"
-	fi
-}
-
-_omw_common_fetch_github_repo_snapshot() {
-	local url="$1"
-	local dest="$2"
-	local archive_url archive_path
-
-	archive_url=$(_omw_common_github_archive_url "$url")
-	archive_path=$(_omw_common_github_archive_cache_path "$url")
-	if [[ -z "$archive_url" || -z "$archive_path" ]]; then
-		omw_log "No archive fallback is available for $url." "ERROR"
-		return 1
-	fi
-
-	omw_log "Falling back to GitHub archive snapshot for $url" "WARN"
-	if ! omw_download_package "$archive_url" "$archive_path"; then
-		return 1
-	fi
-	if ! omw_extract_package "$archive_path" "$dest" 1; then
-		return 1
-	fi
-	omw_log "Repository snapshot prepared: $dest" "SUCCESS"
-}
-
 omw_ensure_module_command() {
 	if ! command -v module &>/dev/null; then
 		omw_log "Environment Modules command 'module' is not available. Source your modules init script first." "ERROR"

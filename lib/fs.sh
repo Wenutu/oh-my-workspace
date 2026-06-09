@@ -10,25 +10,6 @@ _omw_fs_file_size() {
 	fi
 }
 
-omw_sha256_stdin() {
-	if command -v sha256sum >/dev/null 2>&1; then
-		sha256sum | {
-			local hash _
-			read -r hash _
-			printf '%s\n' "$hash"
-		}
-	elif command -v shasum >/dev/null 2>&1; then
-		shasum -a 256 | {
-			local hash _
-			read -r hash _
-			printf '%s\n' "$hash"
-		}
-	else
-		omw_log "sha256sum or shasum is required for digest comparison." "ERROR"
-		return 1
-	fi
-}
-
 omw_file_sha256() {
 	local path="$1"
 	local hash _
@@ -179,7 +160,7 @@ omw_write_bundle_metadata() {
 		printf 'created_at=%s\n' "$(date +%Y%m%d%H%M%S)"
 		printf 'omw_version=%s\n' "${OMW_VERSION:-}"
 		printf 'managed_policy=replace-exact\n'
-		printf 'config_policy=replace-preserve-local\n'
+		printf 'config_policy=restore-from-versioned-packages\n'
 		printf 'packages_policy=merge-overlay\n'
 		printf 'npm_cache_policy=replace\n'
 		printf 'build_kind=%s\n' "$build_kind"
@@ -191,38 +172,6 @@ omw_write_bundle_metadata() {
 		printf 'release_tag=%s\n' "$release_tag"
 		printf 'release_name=%s\n' "$release_name"
 	} >"$meta"
-}
-
-omw_path_sha256() {
-	local path="$1"
-	local rel target hash
-
-	if [[ -L "$path" ]]; then
-		target=$(readlink "$path") || return 1
-		printf 'L\t%s\n' "$target" | omw_sha256_stdin
-	elif [[ -f "$path" ]]; then
-		omw_file_sha256 "$path"
-	elif [[ -d "$path" ]]; then
-		(
-			cd "$path" || exit 1
-			find . -mindepth 1 -print | LC_ALL=C sort | while IFS= read -r rel; do
-				if [[ -L "$rel" ]]; then
-					target=$(readlink "$rel") || exit 1
-					printf 'L\t%s\t%s\n' "$rel" "$target"
-				elif [[ -f "$rel" ]]; then
-					hash=$(omw_file_sha256 "$rel") || exit 1
-					printf 'F\t%s\t%s\n' "$rel" "$hash"
-				elif [[ -d "$rel" ]]; then
-					printf 'D\t%s\n' "$rel"
-				else
-					printf 'O\t%s\n' "$rel"
-				fi
-			done | omw_sha256_stdin
-		)
-	else
-		omw_log "Path not found for sha256 digest: $path" "ERROR"
-		return 1
-	fi
 }
 
 omw_ensure_valid_cwd() {
@@ -302,16 +251,6 @@ omw_safe_rm_rf() {
 		return 1
 	fi
 	rm -rf -- "$path"
-}
-
-omw_clear_directory_contents() {
-	local path="$1"
-	if [[ -z "$path" ]] || ! _omw_fs_is_internal_path "$path"; then
-		omw_log "Refusing to clear unsafe directory: '${path}'" "ERROR"
-		return 1
-	fi
-	mkdir -p "$path"
-	find "$path" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 }
 
 omw_copy_path_contents() {

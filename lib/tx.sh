@@ -10,8 +10,6 @@ omw_tx_begin() {
 	OMW_TX_TMP_PATHS=()
 	OMW_TX_INTERNAL_PATHS=()
 	OMW_TX_INTERNAL_BACKUPS=()
-	OMW_TX_EXTERNAL_PATHS=()
-	OMW_TX_EXTERNAL_BACKUPS=()
 }
 
 omw_tx_track_internal_tmp() {
@@ -39,17 +37,6 @@ omw_tx_backup_internal() {
 	OMW_TX_INTERNAL_BACKUPS+=("$backup")
 }
 
-omw_tx_backup_external() {
-	local path="$1"
-	local reason="${2:-config}"
-	local backup=""
-	if [[ -e "$path" || -L "$path" ]]; then
-		backup=$(_omw_common_backup_path_once "$path" "$reason") || return 1
-	fi
-	OMW_TX_EXTERNAL_PATHS+=("$path")
-	OMW_TX_EXTERNAL_BACKUPS+=("$backup")
-}
-
 omw_tx_commit() {
 	local backup
 	[[ "${OMW_TX_ACTIVE:-false}" == "true" ]] || return 0
@@ -63,7 +50,7 @@ omw_tx_commit() {
 }
 
 omw_tx_rollback() {
-	local i path backup internal_count=0 external_count=0
+	local i path backup internal_count=0
 	[[ "${OMW_TX_ACTIVE:-false}" == "true" ]] || return 0
 	[[ -z "${OMW_TX_INTERNAL_PATHS+x}" ]] || internal_count=${#OMW_TX_INTERNAL_PATHS[@]}
 	for ((i = internal_count - 1; i >= 0; i--)); do
@@ -71,18 +58,6 @@ omw_tx_rollback() {
 		backup="${OMW_TX_INTERNAL_BACKUPS[$i]}"
 		[[ -e "$path" || -L "$path" ]] && omw_safe_rm_rf "$path"
 		[[ -n "$backup" && ( -e "$backup" || -L "$backup" ) ]] && mv "$backup" "$path"
-	done
-	[[ -z "${OMW_TX_EXTERNAL_PATHS+x}" ]] || external_count=${#OMW_TX_EXTERNAL_PATHS[@]}
-	for ((i = external_count - 1; i >= 0; i--)); do
-		path="${OMW_TX_EXTERNAL_PATHS[$i]}"
-		backup="${OMW_TX_EXTERNAL_BACKUPS[$i]}"
-		if [[ -n "$backup" && ( -e "$backup" || -L "$backup" ) ]]; then
-			[[ -e "$path" || -L "$path" ]] && mv "$path" "${backup}.failed-$$"
-			cp -a "$backup" "$path"
-		elif [[ -e "$path" || -L "$path" ]]; then
-			mkdir -p "$OMW_HOME/backups"
-			mv "$path" "$OMW_HOME/backups/rollback-created-$(date +%Y%m%d%H%M%S)-$(basename "$path")"
-		fi
 	done
 	for path in ${OMW_TX_TMP_PATHS[@]+"${OMW_TX_TMP_PATHS[@]}"}; do
 		[[ -e "$path" || -L "$path" ]] && omw_safe_rm_rf "$path"

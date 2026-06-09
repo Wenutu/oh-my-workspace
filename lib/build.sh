@@ -48,11 +48,9 @@ _omw_build_execute_steps() {
 	popd >/dev/null
 }
 
-# --- Dedicated Build Functions for Each Software ---
 _omw_build_ncurses() {
 	local build_dir="$1"
 	local prefix="$2"
-	# local config_cmd="./configure --prefix=$prefix --with-shared --enable-pc-files --enable-widec"
 	local config_cmd="./configure --prefix=$prefix --with-normal --disable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
 	_omw_build_execute_steps "$build_dir" "$config_cmd" "$prefix"
 	config_cmd="./configure --prefix=$prefix --with-normal --enable-widec --with-shared --with-termlib --enable-pc-files --with-pkg-config-libdir=$prefix/lib/pkgconfig --enable-overwrite"
@@ -161,7 +159,6 @@ _omw_build_node() {
 	omw_log "Set Node package prefix to $prefix." "INFO"
 }
 
-# Default build function for software that follows the standard ./configure pattern
 _omw_build_default() {
 	local appname="$1"
 	local build_dir="$2"
@@ -348,20 +345,16 @@ _omw_build_replace_local_rpm_dir() {
 	mv "$source_dir" "$dest_dir"
 }
 
-# Helper function to parse 'name@version' string
 omw_parse_target() {
 	local target_str="$1"
 	local appname="${target_str%@*}"
 	local version="${target_str#*@}"
-	# If no version is specified, it's just the appname
 	if [[ "$appname" == "$version" ]]; then
 		version=""
 	fi
-	# Return as a string to be read by the caller
 	echo "$appname $version"
 }
 
-# Main dispatcher for building software, now handles versioning
 omw_build_software() {
 	local target_str="$1" # e.g., "python@3.11.12" or "local"
 	local force="${2:-false}"
@@ -370,9 +363,7 @@ omw_build_software() {
 	local appname version
 	read -r appname version < <(omw_parse_target "$target_str")
 
-	# Special handling for 'local' target which has no version
 	if [[ "$appname" == "local" ]]; then
-		# local version uses the key from the config file.
 		omw_build_local "$force" "$refresh" "${SOFTWARE_VERSIONS[local]}"
 		return $?
 	fi
@@ -538,7 +529,7 @@ omw_prepare_build_software() {
 omw_build_local() {
 	local force="${1:-false}"
 	local refresh="${2:-false}"
-	local version="${3}" # Version is now passed in
+	local version="${3}"
 	local prefix
 	prefix=$(omw_software_prefix "local" "$version")
 	local rpm_dir="$BUILDS_PATH/local-${version}-rpms"

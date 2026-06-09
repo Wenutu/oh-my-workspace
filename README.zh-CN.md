@@ -149,9 +149,10 @@ source ~/.bashrc
 ```
 
 输入可以是 `.tar.gz` 离线包，也可以是已解压的 bundle 目录。升级会事务化更新
-OMW 管理文件（`VERSION`、`omw`、`env.sh`、`packages.sh`、`README.md`、
-`compose.yaml`、`lib/`、`config/` 和 `CHANGELOG.md`），并保留 `config/local/`
-下的本地用户覆盖配置。
+OMW 管理文件，安装 `lib/$OMW_VERSION/`，合并 `packages/`，并在最后切换
+`VERSION`。升级不会直接替换 `config/`；之后由 `./omw config` 或 `./omw all`
+从新版 `packages/config-<target>-$OMW_VERSION.tar.gz` 恢复版本化运行配置，
+因此 `config/local/` 会保持不变。
 
 `--dry-run` 会打印真实执行路径使用的同一份升级计划，并展示 source/target 路径、
 manifest 摘要、路径策略以及每个管理路径的执行决策。新版离线包必须包含
@@ -189,13 +190,16 @@ config/vim/vimrc.default
 config/zsh/zshrc.default
 ```
 
-离线打包会把这些源目录转换到 bundle 的版本化运行目录：
+离线 bundle 不直接包含版本化运行目录，而是携带：
 
 ```text
-config/$OMW_VERSION/tmux
-config/$OMW_VERSION/vim
-config/$OMW_VERSION/zsh
+packages/config-tmux-$OMW_VERSION.tar.gz
+packages/config-vim-$OMW_VERSION.tar.gz
+packages/config-zsh-$OMW_VERSION.tar.gz
 ```
+
+目标机器运行 `./omw config` 或 `./omw all` 后，再将它们恢复到
+`config/$OMW_VERSION/<target>`。
 
 以下用户覆盖配置始终保留本地版本，`--force` 也不会覆盖：
 

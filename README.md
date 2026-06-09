@@ -188,9 +188,12 @@ layouts are intentionally unsupported:
 ```
 
 The command accepts either the `.tar.gz` bundle or an extracted bundle
-directory. It updates managed OMW files (`VERSION`, `omw`, `env.sh`, `packages.sh`,
-`README.md`, `docs/`, `compose.yaml`, `lib/`, and `config/`) in one transaction. Local
-configuration override files under `config/local/` are preserved.
+directory. It updates managed OMW files (`omw`, `env.sh`, `packages.sh`,
+`README.md`, `docs/`, and `compose.yaml`), installs `lib/$OMW_VERSION/`, merges
+bundle assets into `packages/`, then switches `VERSION` last. It never replaces
+`config/`; versioned runtime config is restored later from the bundled
+`packages/config-<target>-$OMW_VERSION.tar.gz` archives by `./omw config` or
+`./omw all`, so `config/local/` remains untouched.
 
 `--dry-run` prints the same upgrade plan used by the real execution path,
 including source and target paths, manifest summaries, per-path policies, and
@@ -254,7 +257,9 @@ Re-run `./omw offline verify` any time you want to check that the extracted offl
 configuration flows that access GitHub or npm. They reuse prepared config
 dependencies when present, download missing ones, and overwrite the matching
 `packages/config-<target>-$OMW_VERSION.tar.gz` archives. Repository config
-sources stay in `config/<target>`; the offline bundle stages them as
+sources stay in `config/<target>`; the offline bundle carries them only in
+`packages/config-<target>-$OMW_VERSION.tar.gz`. On the target machine,
+`./omw config` or `./omw all` restores those archives into
 `config/$OMW_VERSION/<target>` so installed releases can keep versioned runtime
 config. Prepared config directories are archived with their Git metadata so
 offline restore only needs extraction.

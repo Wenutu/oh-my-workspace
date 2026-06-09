@@ -252,32 +252,20 @@ _omw_offline_archive_items() {
 	done
 }
 
-_omw_offline_stage_config_tree() {
-	local bundle_root="$1"
-	local target source_target runtime_target
-
-	mkdir -p "$bundle_root/config/$OMW_VERSION"
-	for target in "${CONFIG_TARGET_LIST[@]}"; do
-		source_target=$(omw_config_source_target_dir "$target")
-		runtime_target="$bundle_root/config/$OMW_VERSION/$target"
-		if [[ -d "$source_target" ]]; then
-			cp -a "$source_target" "$runtime_target" || return 1
-		else
-			omw_log "Config source target is missing and will not be bundled: $source_target" "WARN"
-		fi
-	done
-}
-
 _omw_offline_prepare_bundle_root() {
 	local bundle_root="$1"
-	local item
+	local item old_lib_dir
 
-	mkdir -p "$bundle_root"
+	mkdir -p "$bundle_root" || return 1
 	while IFS= read -r item; do
-		cp -a "$OMW_HOME/$item" "$bundle_root/"
+		cp -a "$OMW_HOME/$item" "$bundle_root/" || return 1
 	done < <(_omw_offline_archive_items)
-	mkdir -p "$bundle_root/lib/$OMW_VERSION"
-	mv -f "$bundle_root/lib/"*.sh "$bundle_root/lib/$OMW_VERSION/"
+	mkdir -p "$bundle_root/lib/$OMW_VERSION" || return 1
+	mv -f "$bundle_root/lib/"*.sh "$bundle_root/lib/$OMW_VERSION/" || return 1
+	for old_lib_dir in "$bundle_root/lib"/*; do
+		[[ -d "$old_lib_dir" && ! -L "$old_lib_dir" && "$(basename "$old_lib_dir")" != "$OMW_VERSION" ]] || continue
+		omw_safe_rm_rf "$old_lib_dir" || return 1
+	done
 	omw_log "Writing bundle metadata and manifest." "INFO"
 	omw_write_bundle_metadata "$bundle_root" "$bundle_root/.omw-bundle-meta" || return 1
 	omw_write_bundle_manifest "$bundle_root" "$bundle_root/.omw-bundle-manifest" || return 1
@@ -364,14 +352,14 @@ omw_prepare_config_package() {
 		return 1
 	fi
 
-	mkdir -p "$(dirname "$package_path")"
+	mkdir -p "$(dirname "$package_path")" || return 1
 	rm -f "$tmp_package"
 	if ! COPYFILE_DISABLE=1 tar "${excludes[@]}" -czf "$tmp_package" -C "$CONFIG_PATH" "$target"; then
 		rm -f "$tmp_package"
 		omw_log "Failed to create config package: $package_path" "ERROR"
 		return 1
 	fi
-	mv -f "$tmp_package" "$package_path"
+	mv -f "$tmp_package" "$package_path" || return 1
 	omw_log "Config package created: $package_path" "SUCCESS"
 }
 
@@ -397,7 +385,7 @@ omw_create_offline_bundle() {
 	local tmp_archive="$OMW_HOME/.${archive_name}.tmp"
 	local staging_dir="$BUILDS_PATH/.offline-bundle-$$"
 	local bundle_root="$staging_dir/oh-my-workspace"
-	omw_safe_rm_rf "$staging_dir"
+	omw_safe_rm_rf "$staging_dir" || return 1
 	rm -f "$tmp_archive" "$archive_path"
 	if ! _omw_offline_prepare_bundle_root "$bundle_root"; then
 		omw_safe_rm_rf "$staging_dir"
@@ -412,7 +400,7 @@ omw_create_offline_bundle() {
 		return 1
 	fi
 	omw_safe_rm_rf "$staging_dir"
-	mv -f "$tmp_archive" "$archive_path"
+	mv -f "$tmp_archive" "$archive_path" || return 1
 	omw_log "Offline bundle created successfully!" "SUCCESS"
 	omw_log "To use, transfer '$archive_path' to an offline machine, extract it, and run './omw all'" "INFO"
 }

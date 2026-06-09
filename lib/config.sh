@@ -65,28 +65,8 @@ omw_config_package_path() {
 	printf '%s/config-%s-%s.tar.gz' "$PACKAGES_PATH" "$1" "$OMW_VERSION"
 }
 
-omw_config_required_path() {
-	local target_dir
-	target_dir=$(omw_config_source_target_dir "$1")
-	case "$1" in
-	tmux) printf '%s/.tmux' "$target_dir" ;;
-	vim) printf '%s/vim9/pack/omw/start' "$target_dir" ;;
-	zsh) printf '%s/.oh-my-zsh' "$target_dir" ;;
-	*) printf '%s' "$target_dir" ;;
-	esac
-}
-
-omw_config_ready_for_package() {
-	local required_path first_entry
-	required_path=$(omw_config_required_path "$1")
-	[[ -d "$required_path" ]] || return 1
-	first_entry=$(find "$required_path" -mindepth 1 -print -quit)
-	[[ -n "$first_entry" ]]
-}
-
 omw_restore_config_package() {
 	local target="$1"
-	local force="${2:-false}"
 	local package_path stage_dir target_dir
 	package_path=$(omw_config_package_path "$target")
 	stage_dir="$BUILDS_PATH/.tmp-$$-config-$target"
@@ -476,7 +456,6 @@ omw_prepare_config_for_package() {
 
 omw_configure() {
 	local target="$1"
-	local force="${2:-false}"
 	local apply_func="_omw_config_apply_$target"
 	CONFIG_BACKUP_PATHS=()
 	OMW_CONFIG_PACKAGE_RESTORED_TARGET=""
@@ -487,7 +466,7 @@ omw_configure() {
 	fi
 	omw_log "Configuring $target..."
 	_omw_config_ensure_local_files || return 1
-	omw_restore_config_package "$target" "$force" || return 1
+	omw_restore_config_package "$target" || return 1
 	"$apply_func" || return 1
 	omw_log "$target configuration complete." "SUCCESS"
 	omw_print_config_backup_paths
