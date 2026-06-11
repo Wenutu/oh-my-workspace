@@ -408,16 +408,28 @@ _omw_build_execute_plan() {
 	omw_ensure_module_command || return 1
 	OMW_BUILD_ORIGINAL_MODULES=$(module -t list 2>&1 | grep -v '^No Modulefiles Currently Loaded' || true)
 	for target in "${OMW_BUILD_PLAN[@]}"; do
-		module purge || { status=1; break; }
+		module purge || {
+			status=1
+			break
+		}
 		for dep in ${SOFTWARE_DEPS[$target]:-}; do
 			read -r dep_name dep_version < <(omw_parse_target "$dep")
-			module load "$dep_name/$dep_name-$dep_version" || { status=1; break; }
+			module load "$dep_name/$dep_name-$dep_version" || {
+				status=1
+				break
+			}
 		done
 		((status == 0)) || break
 		if [[ "$target" == "$OMW_BUILD_PLAN_ROOT" ]]; then
-			_omw_build_software_one "$target" "$force" "$refresh" || { status=$?; break; }
+			_omw_build_software_one "$target" "$force" "$refresh" || {
+				status=$?
+				break
+			}
 		else
-			_omw_build_software_one "$target" false false || { status=$?; break; }
+			_omw_build_software_one "$target" false false || {
+				status=$?
+				break
+			}
 		fi
 	done
 	_omw_build_restore_modules || status=1
@@ -428,8 +440,34 @@ omw_build_software() {
 	local target_str="$1"
 	local force="${2:-false}"
 	local refresh="${3:-false}"
+	if [[ "$refresh" == "true" ]]; then
+		_omw_build_refresh_modulefile "$target_str"
+		return
+	fi
 	omw_build_plan "$target_str" || return 1
 	_omw_build_execute_plan "$force" "$refresh"
+}
+
+_omw_build_refresh_modulefile() {
+	local target_str="$1"
+	local appname version
+	read -r appname version < <(omw_parse_target "$target_str")
+
+	if [[ -z "${SOFTWARE_VERSIONS[$appname]:-}" ]]; then
+		omw_log "No versions defined for '$appname' in packages.sh." "ERROR"
+		return 1
+	fi
+	if [[ -z "$version" ]]; then
+		omw_log "No version specified for '$appname'." "ERROR"
+		return 1
+	fi
+	if ! omw_contains_word "$version" "${SOFTWARE_VERSIONS[$appname]}"; then
+		omw_log "Version '$version' is not defined for '$appname' in packages.sh." "ERROR"
+		return 1
+	fi
+
+	omw_log "Refreshing modulefile for $appname@$version." "INFO"
+	_omw_build_write_modulefile "$appname" "$version" true
 }
 
 _omw_build_software_one() {
@@ -460,12 +498,8 @@ _omw_build_software_one() {
 	omw_log "--- Building $appname $version ---" "INFO"
 
 	if [[ "$refresh" == "true" ]]; then
-		omw_log "Refreshing modulefile for $appname@$version." "INFO"
-		if ! _omw_build_write_modulefile "$appname" "$version"; then
-			return 1
-		fi
-		omw_log "$appname@$version modulefile refreshed." "SUCCESS"
-		return 0
+		_omw_build_refresh_modulefile "$target_str"
+		return
 	fi
 
 	local prefix
@@ -600,15 +634,13 @@ omw_build_local() {
 	omw_log "--- Handling local system dependencies ---" "INFO"
 
 	if [[ "$refresh" == "true" ]]; then
-		omw_log "Refreshing modulefile for local." "INFO"
-		if ! _omw_build_write_modulefile "local" "$version" ||
-			! _omw_build_finalize_local_modulefile "$version"; then
-			return 1
-		fi
-		omw_log "local modulefile refreshed." "SUCCESS"
-		return 0
+		_omw_build_refresh_modulefile "local@$version"
+		return
 	fi
 	if [[ -d "$prefix" && "$force" == "false" ]]; then
+		if ! _omw_build_write_modulefile "local" "$version"; then
+			return 1
+		fi
 		omw_log "Local dependencies installed. Skipping." "INFO"
 		return 0
 	fi
@@ -662,11 +694,6 @@ omw_build_local() {
 	fi
 
 	if ! _omw_build_write_modulefile "local" "$version"; then
-		omw_safe_rm_rf "$prefix"
-		omw_tx_rollback
-		return 1
-	fi
-	if ! _omw_build_finalize_local_modulefile "$version"; then
 		omw_safe_rm_rf "$prefix"
 		omw_tx_rollback
 		return 1
@@ -800,88 +827,195 @@ omw_clean_software_installs() {
 	done
 }
 
-_omw_build_finalize_local_modulefile() {
-	local version="$1"
-	local modulefile_path
-	modulefile_path=$(omw_software_modulefile "local" "$version")
-
-	if ! sed -i "s|set prefix.*|set prefix  \$base/local/local-$version/usr|g" "$modulefile_path" ||
-		! sed -i "s|\$prefix/lib|\$prefix/lib64|g" "$modulefile_path" ||
-		! cat >>"$modulefile_path" <<-EOF; then
-			prepend-path PKG_CONFIG_PATH    \$prefix/share/pkgconfig
-			prepend-path PERL5LIB           \$prefix/share/perl5
-			prepend-path PERL5LIB           \$prefix/share/perl5/vendor_perl
-			# prepend-path C_INCLUDE_PATH     \$prefix/lib64/perl5/CORE
-			# prepend-path CPLUS_INCLUDE_PATH \$prefix/lib64/perl5/CORE
-		EOF
-		omw_log "Failed to finalize local modulefile." "ERROR"
-		return 1
+_omw_build_modulefile_prefix() {
+	local appname="$1"
+	local version="$2"
+	local prefix
+	prefix=$(omw_software_prefix "$appname" "$version")
+	if [[ "$appname" == "local" ]]; then
+		printf '%s/usr' "$prefix"
+	else
+		printf '%s' "$prefix"
 	fi
+}
+
+_omw_build_modulefile_prepend_if_dir() {
+	local modulefile="$1"
+	local actual_dir="$2"
+	local variable="$3"
+	local module_dir="$4"
+	[[ -d "$actual_dir" ]] || return 0
+	printf 'prepend-path %-18s %s\n' "$variable" "$module_dir" >>"$modulefile"
+}
+
+_omw_build_modulefile_append_flag() {
+	local modulefile="$1"
+	local variable="$2"
+	local value="$3"
+	[[ -n "$value" ]] || return 0
+	cat >>"$modulefile" <<-EOF
+
+		if {[info exists env($variable)]} {
+		    setenv $variable "\$env($variable) $value"
+		} else {
+		    setenv $variable "$value"
+		}
+	EOF
+}
+
+_omw_build_modulefile_abort() {
+	local tmp_modulefile="$1"
+	rm -f "$tmp_modulefile"
+	omw_log "Failed to generate modulefile content." "ERROR"
+	return 1
 }
 
 # Generates a modulefile with version-specific dependencies
 _omw_build_write_modulefile() {
 	local appname="$1"
 	local version="$2"
+	local skip_missing="${3:-false}"
 	local modulefile_path
 	modulefile_path=$(omw_software_modulefile "$appname" "$version")
 	local tmp_modulefile="${modulefile_path}.tmp-$$"
+	local prefix
+	prefix=$(_omw_build_modulefile_prefix "$appname" "$version")
+	local module_prefix="\$base/$appname/$appname-$version"
+	[[ "$appname" == "local" ]] && module_prefix="$module_prefix/usr"
+
+	if [[ ! -d "$prefix" ]]; then
+		if [[ "$skip_missing" == "true" ]]; then
+			omw_log "Skipping modulefile refresh for $appname@$version; install prefix does not exist: $prefix" "WARN"
+			return 0
+		fi
+		omw_log "Cannot generate modulefile for $appname@$version; install prefix does not exist: $prefix" "ERROR"
+		return 1
+	fi
+
 	omw_log "Generating modulefile for $appname@$version" "INFO"
-	mkdir -p "$(dirname "$modulefile_path")"
-	cat >"$tmp_modulefile" <<-EOF
+	mkdir -p "$(dirname "$modulefile_path")" || return 1
+	if ! cat >"$tmp_modulefile" <<-EOF
 		#%Module1.0
 		proc ModulesHelp { } { puts stderr "Loads $appname version $version" }
 		module-whatis "Software: $appname $version"
 		set base    \$env(OMW_HOME)/tools/software
-		set prefix  \$base/$appname/$appname-$version
+		set prefix  $module_prefix
 		conflict $appname
 	EOF
+	then
+		rm -f "$tmp_modulefile"
+		return 1
+	fi
 	# Load dependencies before this module prepends its own paths.
 	local deps="${SOFTWARE_DEPS["$appname@$version"]:-}"
 	if [[ -n "$deps" ]]; then
-		echo "" >>"$tmp_modulefile"
+		printf '\n' >>"$tmp_modulefile" || {
+			rm -f "$tmp_modulefile"
+			return 1
+		}
 		local dep_target
 		for dep_target in $deps; do
 			local dep_name dep_version
 			read -r dep_name dep_version < <(omw_parse_target "$dep_target")
-			echo "module load $dep_name/$dep_name-${dep_version}" >>"$tmp_modulefile"
+			printf 'module load %s/%s-%s\n' "$dep_name" "$dep_name" "$dep_version" >>"$tmp_modulefile" || {
+				rm -f "$tmp_modulefile"
+				return 1
+			}
 		done
-		echo "" >>"$tmp_modulefile"
+		printf '\n' >>"$tmp_modulefile" || {
+			rm -f "$tmp_modulefile"
+			return 1
+		}
 	fi
-	cat >>"$tmp_modulefile" <<-EOF
-		prepend-path PATH              \$prefix/bin
-		prepend-path LIBRARY_PATH      \$prefix/lib
-		prepend-path LD_LIBRARY_PATH   \$prefix/lib
-		prepend-path PKG_CONFIG_PATH   \$prefix/lib/pkgconfig
-		prepend-path MANPATH           \$prefix/share/man
-		prepend-path C_INCLUDE_PATH    \$prefix/include
-		prepend-path CPLUS_INCLUDE_PATH \$prefix/include
-	EOF
+
+	local libdir
+	_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/bin" PATH "\$prefix/bin" || {
+		_omw_build_modulefile_abort "$tmp_modulefile"
+		return 1
+	}
+	for libdir in lib lib64; do
+		_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/$libdir" LIBRARY_PATH "\$prefix/$libdir" || {
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		}
+		_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/$libdir" LD_LIBRARY_PATH "\$prefix/$libdir" || {
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		}
+		_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/$libdir/pkgconfig" PKG_CONFIG_PATH "\$prefix/$libdir/pkgconfig" || {
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		}
+	done
+	_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/share/pkgconfig" PKG_CONFIG_PATH "\$prefix/share/pkgconfig" || {
+		_omw_build_modulefile_abort "$tmp_modulefile"
+		return 1
+	}
+	_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/share/man" MANPATH "\$prefix/share/man" || {
+		_omw_build_modulefile_abort "$tmp_modulefile"
+		return 1
+	}
+	_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/include" C_INCLUDE_PATH "\$prefix/include" || {
+		_omw_build_modulefile_abort "$tmp_modulefile"
+		return 1
+	}
+	_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/include" CPLUS_INCLUDE_PATH "\$prefix/include" || {
+		_omw_build_modulefile_abort "$tmp_modulefile"
+		return 1
+	}
+
+	if [[ "$appname" == "gcc" ]]; then
+		if [[ -x "$prefix/bin/gcc" ]] &&
+			! printf 'setenv CC                   $prefix/bin/gcc\n' >>"$tmp_modulefile"; then
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		fi
+		if [[ -x "$prefix/bin/g++" ]] &&
+			! printf 'setenv CXX                  $prefix/bin/g++\n' >>"$tmp_modulefile"; then
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		fi
+	fi
 	if [[ "$appname" == "node" ]]; then
-		cat >>"$tmp_modulefile" <<-EOF
+		if ! cat >>"$tmp_modulefile" <<-EOF
 			setenv NPM_CONFIG_PREFIX     \$prefix
 			setenv npm_config_prefix     \$prefix
 		EOF
+		then
+			rm -f "$tmp_modulefile"
+			return 1
+		fi
+	fi
+	if [[ "$appname" == "local" ]]; then
+		_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/share/perl5" PERL5LIB "\$prefix/share/perl5" || {
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		}
+		_omw_build_modulefile_prepend_if_dir "$tmp_modulefile" "$prefix/share/perl5/vendor_perl" PERL5LIB "\$prefix/share/perl5/vendor_perl" || {
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		}
 	fi
 	# Add custom compiler flags if defined in packages.sh
 	local key="$appname@$version"
 	local cflags="${SOFTWARE_CFLAGS[$key]:-${SOFTWARE_CFLAGS[$appname]:-}}"
 	local ldflags="${SOFTWARE_LDFLAGS[$key]:-${SOFTWARE_LDFLAGS[$appname]:-}}"
 	if [[ -n "$cflags" || -n "$ldflags" ]]; then
-		cat >>"$tmp_modulefile" <<-EOF
-
-			# Custom compiler flags
-			if {[info exists env(CFLAGS)]} {
-			    setenv CFLAGS "\$env(CFLAGS) ${cflags}"
-			} else {
-			    setenv CFLAGS "${cflags}"
-			}
-			if {[info exists env(LDFLAGS)]} {
-			    setenv LDFLAGS "\$env(LDFLAGS) ${ldflags}"
-			} else {
-			    setenv LDFLAGS "${ldflags}"
-			}
-		EOF
+		printf '\n# Custom compiler flags\n' >>"$tmp_modulefile" || {
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		}
+		_omw_build_modulefile_append_flag "$tmp_modulefile" CFLAGS "$cflags" || {
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		}
+		_omw_build_modulefile_append_flag "$tmp_modulefile" LDFLAGS "$ldflags" || {
+			_omw_build_modulefile_abort "$tmp_modulefile"
+			return 1
+		}
 	fi
-	mv -f "$tmp_modulefile" "$modulefile_path"
+	if ! mv -f "$tmp_modulefile" "$modulefile_path"; then
+		rm -f "$tmp_modulefile"
+		return 1
+	fi
 }

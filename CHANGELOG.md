@@ -5,7 +5,22 @@ All notable changes to **OMW (Oh My Workspace)** will be documented in this file
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1] - 2026-06-11
+
+### Added
+
+- Added batch modulefile refresh with `omw build all --refresh`.
+- Added directory-aware modulefile generation for existing `bin`, `lib`, `lib64`, `pkgconfig`, `share/man`, and `include` directories.
+- Added `CC` and `CXX` environment variables to GCC modulefiles.
+
+### Changed
+
+- Made modulefile refresh bypass build dependency checks and skip missing installation prefixes with warnings.
+- Made normal `omw build all` skip GCC directly while allowing batch refresh to include it.
+
+### Removed
+
+- Removed the `SOFTWARE_BUILD_ALL_EXCLUDES` configuration.
 
 ## [0.2.0] - 2026-06-09
 

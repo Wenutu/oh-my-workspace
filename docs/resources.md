@@ -40,8 +40,16 @@ Each built package gets a modulefile under:
 tools/modulefiles/<name>/<name>-<version>
 ```
 
-OMW adds `PATH`, `LD_LIBRARY_PATH`, `PKG_CONFIG_PATH`, and include paths.
-Custom `CFLAGS` and `LDFLAGS` from `packages.sh` are injected when present.
+OMW inspects the installed prefix and adds only paths that exist. Standard
+`bin`, `lib`, `lib64`, pkg-config, man, and include directories are mapped to
+their matching environment variables. GCC modulefiles also set `CC` and `CXX`
+when the compiler executables exist. Custom `CFLAGS` and `LDFLAGS` from
+`packages.sh` are injected when present.
+
+Use `./omw build all --refresh` to refresh modulefiles for every declared,
+installed source tool, including GCC. Missing install prefixes are reported and
+skipped, and refresh does not require build dependencies. Normal
+`./omw build all` skips GCC; build it explicitly when needed.
 
 ## Prebuilt Apps
 

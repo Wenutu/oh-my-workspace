@@ -104,7 +104,7 @@ _omw_cli_print_help() {
 
 		Options:
 		  --force    Rebuild, reinstall, or replace local config files
-		  --refresh  Regenerate modulefiles without rebuilding source tools
+		  --refresh  Regenerate installed modulefiles, including GCC, without rebuilding
 		EOF
 	build:prepare) cat <<-EOF ;;
 		Usage: ./omw build prepare <software[@version]|all>
@@ -126,7 +126,7 @@ _omw_cli_print_help() {
 
 		Options:
 		  --force    Rebuild an installed target
-		  --refresh  Regenerate modulefiles without rebuilding
+		  --refresh  Regenerate modulefiles for installed targets without rebuilding
 
 		Example:
 		  ./omw build vim --force
@@ -452,6 +452,9 @@ _omw_cli_check_sys_deps() {
 	case "$OMW_COMMAND" in
 	init | status | doctor | "update check" | clean) return 0 ;;
 	build)
+		if [[ "${OMW_REFRESH:-false}" == "true" ]]; then
+			return 0
+		fi
 		if [[ "$OMW_TARGET" == "local" || "$OMW_TARGET" == "local@"* || "$OMW_TARGET" == "all" ]]; then
 			omw_check_sys_deps local
 		else

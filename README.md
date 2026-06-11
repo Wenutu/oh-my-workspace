@@ -93,7 +93,7 @@ the declared remote branch or remote HEAD. Results distinguish `current`,
 Common options:
 
 - `--force`: Force rebuild/reinstall, or refresh generated config assets during prepare.
-- `--refresh`: Regenerate modulefiles only and skip source rebuilds.
+- `--refresh`: Regenerate modulefiles for installed source tools only; missing installs are skipped.
 - `--dry-run`: Preview paths removed by `clean`.
 - `--replace-packages`: Replace `packages/` during `upgrade` instead of merging bundle assets.
 - `--no-color`: Disable colored output.

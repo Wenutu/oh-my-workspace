@@ -4,9 +4,9 @@
 omw_workflow_run_build_all() {
 	local sw version versions_str count=0 skipped=0
 	for sw in "${SOFTWARE_LIST[@]}"; do
-		if ! omw_software_build_all_enabled "$sw"; then
+		if [[ "$sw" == "gcc" && "$OMW_REFRESH" != "true" ]]; then
 			((++skipped))
-			omw_log "Skipping manual-only build target: $sw" "INFO"
+			omw_log "Skipping GCC during build all; build it explicitly when needed." "INFO"
 			continue
 		fi
 		versions_str="${SOFTWARE_VERSIONS[$sw]}"
@@ -14,8 +14,10 @@ omw_workflow_run_build_all() {
 		for version in $versions_str; do
 			((++count))
 			omw_log "Build target $count: $sw@$version" "INFO"
-			omw_ensure_module_command || return 1
-			module purge || return 1
+			if [[ "$OMW_REFRESH" != "true" ]]; then
+				omw_ensure_module_command || return 1
+				module purge || return 1
+			fi
 			omw_build_software "$sw@$version" "$OMW_FORCE" "$OMW_REFRESH" || return 1
 		done
 	done
@@ -23,7 +25,7 @@ omw_workflow_run_build_all() {
 		omw_log "No source build targets are defined in packages.sh." "ERROR"
 		return 1
 	}
-	((skipped == 0)) || omw_log "Skipped $skipped manual-only source build target(s). Build them explicitly when needed." "INFO"
+	((skipped == 0)) || omw_log "Skipped $skipped GCC build target(s)." "INFO"
 }
 
 omw_workflow_run_all() {
@@ -65,15 +67,10 @@ omw_workflow_run_build() {
 }
 
 omw_workflow_run_build_prepare_all() {
-	local sw version versions_str count=0 skipped=0
+	local sw version versions_str count=0
 	declare -g -A OMW_BUILD_PREPARE_SEEN=()
 
 	for sw in "${SOFTWARE_LIST[@]}"; do
-		if ! omw_software_build_all_enabled "$sw"; then
-			((++skipped))
-			omw_log "Skipping manual-only build prepare target: $sw" "INFO"
-			continue
-		fi
 		versions_str="${SOFTWARE_VERSIONS[$sw]}"
 		[[ -z "$versions_str" ]] && continue
 		for version in $versions_str; do
@@ -86,7 +83,6 @@ omw_workflow_run_build_prepare_all() {
 		omw_log "No source build prepare targets are defined in packages.sh." "ERROR"
 		return 1
 	}
-	((skipped == 0)) || omw_log "Skipped $skipped manual-only source build prepare target(s). Prepare them explicitly when needed." "INFO"
 }
 
 omw_workflow_run_build_prepare() {

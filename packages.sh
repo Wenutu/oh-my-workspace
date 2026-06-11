@@ -6,7 +6,6 @@
 # array types globally; this file only resets and fills those containers.
 
 declare -p SOFTWARE_LIST >/dev/null 2>&1 || declare -a SOFTWARE_LIST
-declare -p SOFTWARE_BUILD_ALL_EXCLUDES >/dev/null 2>&1 || declare -a SOFTWARE_BUILD_ALL_EXCLUDES
 declare -p APP_LIST >/dev/null 2>&1 || declare -a APP_LIST
 declare -p NODE_PACKAGE_LIST >/dev/null 2>&1 || declare -a NODE_PACKAGE_LIST
 declare -p NODE_CACHE_PACKAGE_LIST >/dev/null 2>&1 || declare -a NODE_CACHE_PACKAGE_LIST
@@ -30,7 +29,6 @@ declare -p NODE_CACHE_PACKAGE_VERSIONS >/dev/null 2>&1 || declare -A NODE_CACHE_
 declare -p NODE_CACHE_PACKAGE_NODE_VERSIONS >/dev/null 2>&1 || declare -A NODE_CACHE_PACKAGE_NODE_VERSIONS
 
 SOFTWARE_LIST=()
-SOFTWARE_BUILD_ALL_EXCLUDES=()
 SOFTWARE_VERSIONS=()
 SOFTWARE_URLS=()
 SOFTWARE_DEPS=()
@@ -207,8 +205,7 @@ node_cache_package() {
 # Use "-" as the only empty-field placeholder. Do not omit positional fields.
 # Ordinary software uses the declared build command. Software without one must
 # provide a dedicated _omw_build_<name> hook in lib/build.sh.
-# Add expensive or rarely needed source tools to SOFTWARE_BUILD_ALL_EXCLUDES
-# when they should be packaged for offline use but built only by explicit request.
+# GCC is intentionally skipped by `omw build all`; build it explicitly when needed.
 #
 # app fields:
 #   1. name        App name used by `omw app install <name>`.
@@ -285,7 +282,6 @@ software "gcc" \
 	"-" \
 	"-" \
 	"-"
-SOFTWARE_BUILD_ALL_EXCLUDES+=("gcc")
 
 software "python" \
 	"3.12.12" \

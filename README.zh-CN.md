@@ -94,8 +94,9 @@ Vim Git 插件则比较已准备的本地提交与声明分支或远端 HEAD。�
 `status` 将带有效 receipt 的安装显示为 `installed`，旧版兼容安装显示为
 `legacy`，receipt 与实际内容不一致时显示为 `partial`。
 通用参数 `--no-color` 可关闭颜色输出，`--version` 可显示 OMW 版本。使用
-`--refresh` 可只重新生成 modulefile 并跳过源码重建，使用 `clean --dry-run`
-可预览待删除路径。`upgrade --replace-packages` 会用离线包中的 `packages/`
+`--refresh` 可只重新生成已安装软件的 modulefile；未安装的软件会跳过。
+使用 `clean --dry-run` 可预览待删除路径。`upgrade --replace-packages`
+会用离线包中的 `packages/`
 完整替换当前 package 缓存；默认只合并新增或更新的资产。
 
 ## 支持资源

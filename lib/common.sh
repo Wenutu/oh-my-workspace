@@ -81,7 +81,7 @@ omw_init_globals() {
 		;;
 	esac
 	OMW_HOME=$(builtin cd "$OMW_HOME" && builtin pwd)
-	declare -g -a SOFTWARE_LIST SOFTWARE_BUILD_ALL_EXCLUDES APP_LIST NODE_PACKAGE_LIST NODE_CACHE_PACKAGE_LIST CONFIG_BACKUP_PATHS CONFIG_TARGET_LIST
+	declare -g -a SOFTWARE_LIST APP_LIST NODE_PACKAGE_LIST NODE_CACHE_PACKAGE_LIST CONFIG_BACKUP_PATHS CONFIG_TARGET_LIST
 	declare -g -a OMW_TX_TMP_PATHS OMW_TX_PATHS OMW_TX_BACKUPS OMW_TX_SCOPES
 	declare -g -a OMW_UPGRADE_PLAN_ACTIONS OMW_UPGRADE_PLAN_LABELS OMW_UPGRADE_PLAN_SOURCES OMW_UPGRADE_PLAN_DESTS OMW_UPGRADE_PLAN_POLICIES
 	declare -g -A SOFTWARE_VERSIONS SOFTWARE_URLS SOFTWARE_DEPS SOFTWARE_CONFIG_CMDS SOFTWARE_CFLAGS SOFTWARE_LDFLAGS
@@ -159,7 +159,7 @@ omw_init_globals() {
 
 _omw_common_validate_software_config() {
 	local errors=0
-	local name version versions_str key url build_cmd deps dep dep_name dep_version excluded
+	local name version versions_str key url build_cmd deps dep dep_name dep_version
 	local placeholder="${OMW_NONE:--}"
 
 	for name in "${SOFTWARE_LIST[@]}"; do
@@ -219,13 +219,6 @@ _omw_common_validate_software_config() {
 				fi
 			done
 		done
-	done
-
-	for excluded in "${SOFTWARE_BUILD_ALL_EXCLUDES[@]}"; do
-		if ! omw_contains_word "$excluded" "${SOFTWARE_LIST[*]}"; then
-			omw_log "SOFTWARE_BUILD_ALL_EXCLUDES includes '$excluded' but it is not declared in SOFTWARE_LIST." "ERROR"
-			((++errors))
-		fi
 	done
 
 	return "$errors"
@@ -425,11 +418,6 @@ omw_config_source_target_dir() {
 
 omw_config_runtime_target_dir() {
 	printf '%s/%s' "$CONFIG_RELEASE_PATH" "$1"
-}
-
-omw_software_build_all_enabled() {
-	local name="$1"
-	! omw_contains_word "$name" "${SOFTWARE_BUILD_ALL_EXCLUDES[*]:-}"
 }
 
 _omw_common_profile_commands() {

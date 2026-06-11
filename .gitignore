@@ -12,6 +12,7 @@
 /scripts/
 /bak/
 /tests/
+/test/
 
 /lib/**/*
 !/lib/*

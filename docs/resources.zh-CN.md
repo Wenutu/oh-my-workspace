@@ -35,7 +35,14 @@ software <name> <version> <url> <deps> <build-command> <cflags> <ldflags>
 tools/modulefiles/<name>/<name>-<version>
 ```
 
-OMW 会自动设置 `PATH`、`LD_LIBRARY_PATH`、`PKG_CONFIG_PATH` 和 include 路径；`packages.sh` 中的自定义 `CFLAGS`、`LDFLAGS` 也会在需要时注入。
+OMW 会检查实际安装目录，只为存在的 `bin`、`lib`、`lib64`、pkg-config、
+man 和 include 目录设置对应环境变量。GCC 的 modulefile 在编译器可执行文件
+存在时还会设置 `CC` 和 `CXX`；`packages.sh` 中的自定义 `CFLAGS`、
+`LDFLAGS` 也会在需要时注入。
+
+`./omw build all --refresh` 会刷新全部已安装源码软件的 modulefile，包括
+GCC；不存在的安装目录会提示并跳过，刷新过程不要求构建依赖。普通
+`./omw build all` 会跳过 GCC，需要时可显式构建。
 
 ## 预编译应用
 
